@@ -1,0 +1,169 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------------------------------------------- typography */
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    font-family: theme('fontFamily.sans');
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'tnum';
+    text-rendering: optimizeLegibility;
+  }
+
+  /* The reading surfaces use a serif face with academic line height. */
+  .prose-paper {
+    font-family: theme('fontFamily.serif');
+    font-size: 1.0625rem;
+    line-height: 1.85;
+    color: theme('colors.ink.800');
+  }
+  .dark .prose-paper {
+    color: theme('colors.parchment.200');
+  }
+  .prose-paper p {
+    margin: 0 0 0.95em;
+    text-align: justify;
+    hyphens: auto;
+  }
+  .prose-paper h1,
+  .prose-paper h2,
+  .prose-paper h3,
+  .prose-paper h4 {
+    font-family: theme('fontFamily.sans');
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 1.6em 0 0.6em;
+  }
+  .prose-paper h1 { font-size: 1.5rem; }
+  .prose-paper h2 { font-size: 1.25rem; }
+  .prose-paper h3 { font-size: 1.0625rem; }
+  .prose-paper ul,
+  .prose-paper ol { margin: 0 0 1em 1.4em; }
+  .prose-paper ul { list-style: disc; }
+  .prose-paper ol { list-style: decimal; }
+  .prose-paper li { margin: 0.25em 0; }
+  .prose-paper table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1em 0;
+    font-size: 0.9rem;
+    font-family: theme('fontFamily.sans');
+  }
+  .prose-paper th {
+    background: theme('colors.ink.50');
+    font-weight: 600;
+    text-align: left;
+    padding: 0.5em 0.7em;
+    border-bottom: 1.5px solid theme('colors.ink.300');
+  }
+  .dark .prose-paper th { background: theme('colors.ink.900'); }
+  .prose-paper td {
+    padding: 0.45em 0.7em;
+    border-bottom: 1px solid theme('colors.ink.200');
+  }
+  .dark .prose-paper td { border-color: theme('colors.ink.800'); }
+  .prose-paper code {
+    font-family: theme('fontFamily.mono');
+    font-size: 0.86em;
+    background: theme('colors.ink.100');
+    padding: 0.12em 0.35em;
+    border-radius: 4px;
+  }
+  .dark .prose-paper code { background: theme('colors.ink.800'); }
+  .prose-paper blockquote {
+    border-left: 3px solid theme('colors.accent.400');
+    padding-left: 0.9em;
+    color: theme('colors.ink.600');
+    font-style: italic;
+  }
+  .dark .prose-paper blockquote { color: theme('colors.ink.300'); }
+}
+
+/* ------------------------------------------------------------------ scrollbar */
+@layer utilities {
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: theme('colors.ink.300') transparent;
+  }
+  .scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+  .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+  .scroll-thin::-webkit-scrollbar-thumb {
+    background: theme('colors.ink.300');
+    border-radius: 999px;
+  }
+  .dark .scroll-thin::-webkit-scrollbar-thumb { background: theme('colors.ink.700'); }
+
+  .paper-columns {
+    column-count: 2;
+    column-gap: 2rem;
+    column-rule: 1px solid theme('colors.ink.200');
+  }
+  .dark .paper-columns { column-rule-color: theme('colors.ink.800'); }
+}
+
+/* ------------------------------------------------------------------- panels */
+@layer components {
+  .panel {
+    @apply rounded-xl border border-ink-200/70 bg-white shadow-panel dark:border-ink-800 dark:bg-ink-900;
+  }
+  .panel-header {
+    @apply flex items-center justify-between gap-3 border-b border-ink-200/70 px-4 py-3 dark:border-ink-800;
+  }
+  .panel-title {
+    @apply font-sans text-sm font-semibold tracking-wide text-ink-700 dark:text-parchment-200;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 font-sans text-sm
+           font-medium transition-colors focus:outline-none focus-visible:ring-2
+           focus-visible:ring-accent-400/60 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-ink-900 text-parchment-50 hover:bg-ink-800 dark:bg-accent-500 dark:text-ink-950
+           dark:hover:bg-accent-400;
+  }
+  .btn-secondary {
+    @apply btn border border-ink-200 bg-white text-ink-700 hover:bg-ink-50
+           dark:border-ink-700 dark:bg-ink-900 dark:text-parchment-200 dark:hover:bg-ink-800;
+  }
+  .btn-ghost {
+    @apply btn text-ink-600 hover:bg-ink-100 dark:text-parchment-300 dark:hover:bg-ink-800;
+  }
+  .input {
+    @apply w-full rounded-lg border border-ink-200 bg-white px-3 py-2 font-sans text-sm
+           text-ink-900 placeholder:text-ink-400 focus:border-accent-400 focus:outline-none
+           focus:ring-2 focus:ring-accent-400/25 dark:border-ink-700 dark:bg-ink-900
+           dark:text-parchment-100 dark:placeholder:text-ink-500;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-sans text-[11px]
+           font-medium leading-tight;
+  }
+  .kbd {
+    @apply rounded border border-ink-200 bg-ink-50 px-1.5 py-0.5 font-mono text-[10px]
+           text-ink-500 dark:border-ink-700 dark:bg-ink-800 dark:text-ink-300;
+  }
+}
+
+/* ------------------------------------------------------------- citation chip */
+.citation-chip {
+  @apply mx-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded
+         border border-accent-300 bg-accent-50 px-1 font-sans text-[10px] font-semibold
+         text-accent-700 transition-colors hover:bg-accent-200 cursor-pointer
+         dark:border-accent-700 dark:bg-accent-900/50 dark:text-accent-300 dark:hover:bg-accent-800;
+}
+
+/* --------------------------------------------------------- scroll sync hint */
+.sync-glow {
+  box-shadow: inset 3px 0 0 0 theme('colors.accent.400');
+  background: theme('colors.accent.50');
+}
+.dark .sync-glow {
+  background: rgb(249 132 18 / 0.08);
+}
