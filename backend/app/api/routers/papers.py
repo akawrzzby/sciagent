@@ -9,20 +9,60 @@ import tempfile
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from app.core.config import get_settings
 from app.core.events import get_bus, paper_channel
+from app.core.logging import get_logger
 from app.parsing import dedup as dedup_mod
 from app.services import papers as paper_service
 from app.storage.db import session_scope
 from app.storage.models import Paper
 
+logger = get_logger(__name__)
+
 router = APIRouter(prefix="/papers", tags=["papers"])
 
 ALLOWED_SUFFIXES = {".pdf"}
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB
+
+# How many documents may be parsed at the same time.
+#
+# FastAPI's ``BackgroundTasks`` runs its tasks **sequentially**, so a batch
+# upload of N PDFs would be parsed one after another.  The competition asks for
+# a robust "multi-document concurrent analysis", so the ingestion jobs are
+# dispatched onto the event loop instead and guarded by this semaphore.  The
+# value is deliberately small: every parse is CPU bound (PyMuPDF extraction +
+# page rendering) and the host also serves the LLM.
+_PARSE_CONCURRENCY = 3
+_parse_semaphore: asyncio.Semaphore | None = None
+
+
+def _semaphore() -> asyncio.Semaphore:
+    global _parse_semaphore
+    if _parse_semaphore is None:
+        _parse_semaphore = asyncio.Semaphore(_PARSE_CONCURRENCY)
+    return _parse_semaphore
+
+
+async def _ingest_guarded(path: str, filename: str, paper_id: str,
+                          allow_duplicate: bool) -> None:
+    """Run one ingestion job, bounded by the global parse concurrency."""
+    async with _semaphore():
+        try:
+            await paper_service.ingest_pdf(
+                path, filename=filename, paper_id=paper_id,
+                allow_duplicate=allow_duplicate,
+            )
+        except Exception as exc:  # noqa: BLE001 - a background job must not
+            # kill the whole batch: record the failure on the paper row.
+            logger.exception("ingestion failed for %s (%s)", filename, paper_id)
+            async with session_scope() as db:
+                paper = await db.get(Paper, paper_id)
+                if paper is not None:
+                    paper.status = "failed"
+                    paper.parse_error = str(exc)[:500]
 
 
 @router.get("")
@@ -40,7 +80,6 @@ async def stats() -> dict:
 
 @router.post("/upload")
 async def upload(
-    background: BackgroundTasks,
     files: list[UploadFile] = File(...),
     allow_duplicate: bool = Form(False),
 ) -> dict:
@@ -76,13 +115,13 @@ async def upload(
         accepted.append({"paper_id": paper_id, "filename": name, "path": str(target),
                          "size": size})
 
-    # Kick off the parsing jobs.
+    # Kick off the parsing jobs.  They run concurrently (see
+    # ``_PARSE_CONCURRENCY``) so that a batch upload is not processed one
+    # document after another.
     for item in accepted:
-        background.add_task(
-            paper_service.ingest_pdf,
-            item["path"], filename=item["filename"], paper_id=item["paper_id"],
-            allow_duplicate=allow_duplicate,
-        )
+        asyncio.create_task(_ingest_guarded(
+            item["path"], item["filename"], item["paper_id"], allow_duplicate,
+        ))
 
     return {"accepted": accepted, "count": len(accepted),
             "message": "文件已接收，正在后台解析。请订阅事件流查看进度。"}

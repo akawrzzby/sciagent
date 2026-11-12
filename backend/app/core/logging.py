@@ -51,6 +51,16 @@ def setup_logging(level: str = "INFO", json_output: bool = False) -> None:
     for noisy in ("uvicorn.access", "httpx", "httpcore"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
+    # When stdout is a file (the usual deployment) Python block-buffers it, so
+    # the log file stays empty until the buffer fills.  That makes a running
+    # service impossible to observe - which is exactly when the log matters.
+    # Line buffering keeps the file current; it costs nothing on a terminal.
+    try:
+        if not sys.stdout.isatty():
+            sys.stdout.reconfigure(line_buffering=True)  # type: ignore[union-attr]
+    except (AttributeError, ValueError):  # pragma: no cover - exotic stdout
+        pass
+
     _CONFIGURED = True
 
 
