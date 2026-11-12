@@ -294,9 +294,25 @@ cd frontend && npm run build   # 产物在 frontend/dist
 
 ## 五、在线演示
 
-> 在线演示地址与评审账号见 **`docs/demo-script.md`**（演示分镜脚本与操作指引同文档）。
+**演示地址：<https://finished-editing-shore-mrna.trycloudflare.com>**
 
-技术方案：前端与后端同源部署于 Nginx，`/api` 反向代理到 FastAPI；对外由 **Cloudflare Tunnel** 暴露单一 HTTPS 地址，因此在 NAT 环境（无公网 IP）下也能提供公网可访问的演示地址。
+> 完整演示分镜脚本、逐步操作指引与评审账号说明见 **`docs/demo-script.md`**。
+
+技术方案：后端 FastAPI 直接托管前端构建产物（`STATIC_DIR`），`/api` 与 SPA 同源；对外由 **Cloudflare Tunnel** 暴露单一 HTTPS 地址，因此在 NAT 环境（无公网 IP）下也能提供公网可访问的演示地址。
+
+**一键复现**（仓库已提供完整的容器化编排，评审可在本机完整拉起）：
+
+```bash
+cp .env.example .env          # 填入 LLM_BASE_URL / LLM_MODEL 等
+docker compose up -d --build
+# 前端 http://localhost:8080 ，API http://localhost:8000
+```
+
+**单机部署**（无 Docker 环境时）：后端 `bash scripts/run_backend.sh 9000`，前端 `npm ci && npm run build` 后把 `dist/` 交给 `STATIC_DIR`。
+
+**隧道保活**：`scripts/start_tunnel.sh 9000` 会启动 cloudflared 并把公网地址写入 `~/sciagent/tunnel.url`；脚本内置 supervisor 循环，链路断开后自动重连。
+
+> ⚠️ 当前演示地址为 Cloudflare **quick tunnel**（随机域名），重启后地址会变化。若需要评审期内地址固定，请配置 **named tunnel**（提供 Cloudflare 账号或自有域名即可，本仓库已预留 `deploy/nginx.edge.conf.template` 与 `scripts/deploy_edge.sh`）。
 
 ---
 
