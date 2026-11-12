@@ -1,0 +1,26 @@
+# Backend runtime dependencies (pinned to a compatible, reproducible set).
+#
+# Install with:
+#   pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+#
+# NOTE: torch / sentence-transformers are installed separately by
+# scripts/setup_backend.sh because they pull large CUDA wheels; the code
+# degrades gracefully to a pure-BM25 retriever when they are absent.
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.0
+SQLAlchemy==2.0.36
+aiosqlite==0.20.0
+greenlet==3.1.1
+httpx==0.28.1
+python-multipart==0.0.20
+pymupdf==1.25.1
+numpy==2.2.1
+networkx==3.4.2
+scikit-learn==1.6.0
+pillow==11.0.0
+matplotlib==3.10.0
+rapidfuzz==3.11.0
+python-dateutil==2.9.0.post0
