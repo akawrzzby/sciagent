@@ -1,0 +1,131 @@
+# ---------------------------------------------------------------------------
+# SciAgent 一键部署
+#
+#   cp .env.example .env     # 填好 LLM_BASE_URL 等配置（.env 不进版本库）
+#   docker compose up -d
+#
+# 访问方式：
+#   - 本机   : http://127.0.0.1:8080
+#   - 外网   : docker compose logs -f tunnel 里打印的 https://xxx.trycloudflare.com
+#               （Cloudflare 快速隧道，URL 每次重启都会变化，属于预期行为）
+#
+# 关键点：
+#   * 前端与后端必须同源 —— 前端硬编码走 /api 前缀（frontend/src/lib/api.ts），
+#     由 Nginx 反向代理到 backend:8000，所以不能把两者拆到不同域名。
+#   * backend 不对外暴露端口，只在 compose 内部网络可达；对外入口只有 Nginx。
+# ---------------------------------------------------------------------------
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+        # 需要稠密检索/重排时改成 true（会额外下载 CPU 版 torch，镜像约 +2GB）
+        INSTALL_EMBEDDINGS: ${INSTALL_EMBEDDINGS:-false}
+    image: sciagent-backend:latest
+    container_name: sciagent-backend
+    restart: unless-stopped
+
+    # .env 不进版本库；缺失时 compose 会报错，所以先 cp .env.example .env
+    env_file:
+      - .env
+    environment:
+      ENVIRONMENT: prod
+      DEBUG: "false"
+      # 覆盖 .env 里的相对路径，指向挂载的具名卷
+      DATA_DIR: /app/data
+      INDEX_DIR: /app/data/index
+      AUDIT_DIR: /app/data/audit
+      # HuggingFace 模型缓存目录（bge-m3 / bge-reranker-v2-m3）
+      HF_HOME: /app/models/hf
+      SENTENCE_TRANSFORMERS_HOME: /app/models/sentence-transformers
+
+    volumes:
+      # 数据库 / 上传文件 / 解析产物 / 向量索引
+      - sciagent-data:/app/data
+      # HF 模型缓存，避免每次重建容器都重新下载几 GB 权重
+      - sciagent-models:/app/models
+
+    # 仅内部可达，不做端口映射
+    expose:
+      - "8000"
+    # 评测环境若需要直接访问后端（例如用 curl 跑接口），
+    # 取消下面一行的注释并改成 "9000:8000"：
+    # ports:
+    #   - "9000:8000"
+
+    # vLLM 跑在宿主机时，容器内的 127.0.0.1 指向容器自己，
+    # 需要在 .env 里写 LLM_BASE_URL=http://host.docker.internal:8000/v1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    networks:
+      - sciagent
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  frontend:
+    build:
+      # 上下文是仓库根目录：运行阶段需要 deploy/nginx.conf 和 deploy/entrypoint.sh
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        # 前端走同源 /api，由 Nginx 反代，勿改成跨域地址
+        VITE_API_BASE: /api
+    image: sciagent-frontend:latest
+    container_name: sciagent-frontend
+    restart: unless-stopped
+
+    depends_on:
+      backend:
+        condition: service_healthy
+
+    # 只绑本地回环：对外入口由 cloudflared 隧道提供
+    ports:
+      - "127.0.0.1:8080:80"
+
+    networks:
+      - sciagent
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: sciagent-tunnel
+    restart: unless-stopped
+
+    depends_on:
+      - frontend
+
+    # 快速隧道（Quick Tunnel）：无需账号/域名，容器日志会打印随机公网 URL。
+    # 注意：每次重启 URL 都会变，且该隧道不适合长期稳定对外服务。
+    command: tunnel --no-autoupdate --url http://frontend:80
+
+    networks:
+      - sciagent
+
+volumes:
+  # 后端持久化：SQLite 数据库、上传 PDF、页面图、向量索引
+  sciagent-data:
+    name: sciagent-data
+  # HuggingFace 模型缓存
+  sciagent-models:
+    name: sciagent-models
+
+networks:
+  # 自定义 bridge 网络，服务名（backend / frontend）由 Docker 内置 DNS 解析
+  sciagent:
+    name: sciagent
+    driver: bridge
