@@ -1,0 +1,62 @@
+# ---- 环境变量与密钥 ----
+# .env 绝不进版本库（含 API key / 数据库口令 / 评审账号密码）
+.env
+.env.*
+!.env.example
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# ---- Node / 前端 ----
+node_modules/
+dist/
+build/
+.vite/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- 运行时数据 ----
+*.sqlite
+*.sqlite3
+*.db
+data/
+index/
+models/
+uploads/
+logs/
+
+# ---- 日志 ----
+*.log
+
+# ---- 编辑器 / IDE ----
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ---- 操作系统 ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- 部署产物 ----
+docker-compose.override.yml

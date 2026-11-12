@@ -1,0 +1,50 @@
+# 构建上下文（frontend 构建上下文为仓库根目录）不需要的文件
+# 目的：减小传输体积、避免把本地密钥/缓存打进镜像、避免宿主机产物覆盖镜像内产物
+
+# ---- 版本控制与 IDE ----
+.git
+.gitignore
+.github
+.idea
+.vscode
+
+# ---- 依赖目录 ----
+node_modules
+**/node_modules
+.venv
+venv
+
+# ---- 构建产物（前端镜像里由 npm run build 重新生成）----
+**/dist
+**/build
+
+# ---- Python 缓存 ----
+**/__pycache__
+**/*.pyc
+**/*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# ---- 运行时数据与日志 ----
+data
+**/data
+index
+**/index
+models
+**/models
+uploads
+**/uploads
+*.log
+*.sqlite
+*.sqlite3
+*.db
+
+# ---- 密钥：本机 .env 绝不进镜像 ----
+.env
+.env.*
+!.env.example
+
+# ---- 系统垃圾文件 ----
+.DS_Store
+Thumbs.db
