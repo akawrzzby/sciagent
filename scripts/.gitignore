@@ -1,0 +1,18 @@
+# Local one-off diagnostics (not part of the public repository).
+#
+# These scripts were used while chasing the foreign-key bug and the
+# PyMuPDF table-detection race.  They are kept locally for reference; the
+# reusable versions that *are* part of the repo live next to this file.
+
+_*.sh
+probe_range.py
+check_doc_name.py
+repro_fk.py
+cf_state.sh
+db_state.sh
+host_load.sh
+lib_state.sh
+log_summary.sh
+log_tail.sh
+status_all.sh
+tunnel_status.sh

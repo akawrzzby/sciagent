@@ -13,11 +13,13 @@ or a process pool so the event loop stays responsive for streaming answers.
 from __future__ import annotations
 
 import contextlib
+import threading
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.core.config import get_settings
 from app.core.events import get_bus
@@ -39,10 +41,35 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     await init_db()
 
+    # Warm up the retrieval models in the background.  Loading bge-m3 takes a
+    # couple of seconds; doing it here keeps the first user request fast and
+    # makes ``/api/health`` report the *real* capability of the dense and
+    # rerank channels instead of "not loaded yet".
+    _warm_up_retrieval_models()
+
     yield
 
     await dispose_db()
     logger.info("shutdown complete")
+
+
+def _warm_up_retrieval_models() -> None:
+    """Load the embedding / reranker models off the event loop."""
+
+    def _load() -> None:
+        from app.rag.embeddings import get_embedding_service
+
+        service = get_embedding_service()
+        try:
+            service.encode(["warm up"], is_query=False)
+            service.rerank("warm up", ["warm up passage"])
+        except Exception as exc:  # noqa: BLE001 - the service degrades on its own
+            logger.warning("retrieval warm-up failed: %s", exc)
+        status = service.status()
+        logger.info("retrieval models ready: dense=%s reranker=%s",
+                    status.get("dense_available"), status.get("reranker_available"))
+
+    threading.Thread(target=_load, name="sciagent-warmup", daemon=True).start()
 
 
 def create_app() -> FastAPI:
@@ -94,7 +121,38 @@ def create_app() -> FastAPI:
         return {"name": settings.app_name, "version": settings.app_version,
                 "docs": "/api/docs"}
 
+    # ------------------------------------------------------- static frontend
+    _mount_frontend(app, settings.static_dir)
+
     return app
+
+
+def _mount_frontend(app: FastAPI, static_dir: str) -> None:
+    """Serve the built SPA from the same process when ``STATIC_DIR`` is set.
+
+    The API routers are registered first, so ``/api/*`` always wins; anything
+    else falls back to ``index.html`` so that the React Router deep links
+    (``/graph``, ``/reader/<id>`` …) survive a page reload.
+    """
+    if not static_dir:
+        return
+    root = Path(static_dir).expanduser().resolve()
+    index = root / "index.html"
+    if not index.is_file():
+        logger.warning("STATIC_DIR=%s has no index.html - the SPA is not served",
+                       static_dir)
+        return
+
+    logger.info("serving the frontend from %s", root)
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def _spa(full_path: str) -> FileResponse:
+        if full_path:
+            candidate = (root / full_path).resolve()
+            # Never serve anything outside the static root.
+            if candidate.is_file() and root in candidate.parents:
+                return FileResponse(candidate)
+        return FileResponse(index)
 
 
 app = create_app()

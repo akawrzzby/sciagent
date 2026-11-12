@@ -106,6 +106,11 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ misc
     log_level: str = "INFO"
     log_json: bool = False
+    # Optional directory with the built frontend.  When it is set (and exists)
+    # the same process serves the SPA *and* the API, which keeps the public
+    # demo behind a single URL and removes the need for a separate reverse
+    # proxy.  Empty disables the static hosting.
+    static_dir: str = ""
 
     @field_validator("data_dir", "index_dir", "audit_dir", mode="before")
     @classmethod

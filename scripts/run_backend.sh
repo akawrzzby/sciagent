@@ -16,6 +16,29 @@ export PYTHONPATH="$BACKEND_DIR:${PYTHONPATH:-}"
 export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 export MPLBACKEND=Agg
 
+# The retrieval models are pre-downloaded to ~/models by
+# scripts/download_models.py.  Prefer the local directory: the HF mirror is
+# unreachable from many networks and a failed download would silently degrade
+# the dense channel.
+MODEL_ROOT="${MODEL_ROOT:-$HOME/models}"
+if [ -d "$MODEL_ROOT/bge-m3" ]; then
+  export EMBEDDING_MODEL="${EMBEDDING_MODEL:-$MODEL_ROOT/bge-m3}"
+fi
+if [ -d "$MODEL_ROOT/bge-reranker-v2-m3" ]; then
+  export RERANKER_MODEL="${RERANKER_MODEL:-$MODEL_ROOT/bge-reranker-v2-m3}"
+fi
+# 192 threads on a 192-core host costs a 13x throughput loss; 64 is the sweet
+# spot for bge-m3 (see docs/technical-report.md, section 4.8).
+export EMBEDDING_THREADS="${EMBEDDING_THREADS:-64}"
+
+# Serve the built SPA from the same process when the build output is present.
+# This keeps the public demo behind a single URL (no separate reverse proxy).
+STATIC_CANDIDATE="${STATIC_CANDIDATE:-$HOME/sciagent/frontend/dist}"
+if [ -f "$STATIC_CANDIDATE/index.html" ]; then
+  export STATIC_DIR="${STATIC_DIR:-$STATIC_CANDIDATE}"
+  echo "==> serving the frontend from $STATIC_DIR"
+fi
+
 exec "$ENV_DIR/bin/python" -m uvicorn app.main:app \
     --host "$HOST" --port "$PORT" \
     --workers 1 --timeout-keep-alive 120 \
