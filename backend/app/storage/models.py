@@ -88,6 +88,29 @@ class Paper(Base):
     references: Mapped[list["PaperReference"]] = relationship(
         back_populates="paper", cascade="all, delete-orphan"
     )
+    # The tables below are only reachable through ``paper_id``.  They still need
+    # an ORM relationship: the unit of work derives the INSERT order from the
+    # relationship graph, *not* from the raw ForeignKey constraints.  Without
+    # these, a child row can be emitted before the parent row exists and
+    # SQLite rejects the whole flush with "FOREIGN KEY constraint failed".
+    blocks: Mapped[list["ContentBlock"]] = relationship(
+        back_populates="paper", cascade="all, delete-orphan", order_by="ContentBlock.order_index"
+    )
+    tables: Mapped[list["PaperTable"]] = relationship(
+        back_populates="paper", cascade="all, delete-orphan"
+    )
+    figures: Mapped[list["PaperFigure"]] = relationship(
+        back_populates="paper", cascade="all, delete-orphan"
+    )
+    formulas: Mapped[list["PaperFormula"]] = relationship(
+        back_populates="paper", cascade="all, delete-orphan"
+    )
+    versions: Mapped[list["PaperVersion"]] = relationship(
+        back_populates="paper", cascade="all, delete-orphan"
+    )
+    translations: Mapped[list["Translation"]] = relationship(
+        back_populates="paper", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (Index("ix_papers_arxiv_version", "arxiv_id", "version_label"),)
 
@@ -109,6 +132,8 @@ class PaperVersion(Base):
     # LLM generated summary of what changed between this and the other version.
     diff_summary: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    paper: Mapped[Paper] = relationship(back_populates="versions")
 
 
 class Section(Base):
@@ -157,6 +182,8 @@ class ContentBlock(Base):
 
     __table_args__ = (Index("ix_blocks_paper_page", "paper_id", "page_no"),)
 
+    paper: Mapped[Paper] = relationship(back_populates="blocks")
+
 
 class PaperTable(Base):
     """An extracted table."""
@@ -170,6 +197,8 @@ class PaperTable(Base):
     markdown: Mapped[str] = mapped_column(Text, default="")
     csv_text: Mapped[str] = mapped_column(Text, default="")
     bbox: Mapped[list[float]] = mapped_column(JSON, default=list)
+
+    paper: Mapped[Paper] = relationship(back_populates="tables")
 
 
 class PaperFigure(Base):
@@ -186,6 +215,8 @@ class PaperFigure(Base):
     # VLM-generated description of the figure content (multimodal understanding).
     description: Mapped[str] = mapped_column(Text, default="")
 
+    paper: Mapped[Paper] = relationship(back_populates="figures")
+
 
 class PaperFormula(Base):
     """A detected formula, optionally transcribed to LaTeX by the VLM."""
@@ -198,6 +229,8 @@ class PaperFormula(Base):
     latex: Mapped[str] = mapped_column(Text, default="")
     raw_text: Mapped[str] = mapped_column(Text, default="")
     bbox: Mapped[list[float]] = mapped_column(JSON, default=list)
+
+    paper: Mapped[Paper] = relationship(back_populates="formulas")
 
 
 class PaperReference(Base):
@@ -312,6 +345,8 @@ class Translation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (UniqueConstraint("paper_id", "locale", name="uq_translation"),)
+
+    paper: Mapped[Paper] = relationship(back_populates="translations")
 
 
 class ChatMessage(Base):

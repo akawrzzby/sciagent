@@ -126,6 +126,19 @@ async def ingest_pdf(
     filename = filename or os.path.basename(source_path)
     channel = paper_channel(paper_id)
 
+    # Create the "parsing" placeholder row straight away.  It makes the job
+    # visible in the library while the parser is still running and it gives the
+    # caller a record to attach the error to if the parse fails.
+    async with session_scope() as db:
+        placeholder = await db.get(Paper, paper_id)
+        if placeholder is None:
+            placeholder = Paper(id=paper_id)
+            db.add(placeholder)
+        placeholder.filename = filename
+        placeholder.source_path = source_path
+        placeholder.status = "parsing"
+        placeholder.parse_error = ""
+
     await _emit(channel, "status", status="parsing", message="正在解析 PDF …", paper_id=paper_id)
 
     async def progress(fraction: float, message: str) -> None:
@@ -136,6 +149,8 @@ async def ingest_pdf(
         source_path, paper_id=paper_id, out_dir=str(settings.data_dir / "pages"),
         progress=progress, session_id=session_id,
     )
+    logger.info("parsed %s: %s pages, %s chars, %.1fs", filename, parsed.page_count,
+                len(parsed.full_text), parsed.parse_seconds)
 
     # ---- duplicate detection -------------------------------------------
     fingerprint = pipeline.build_fingerprint(
@@ -145,12 +160,16 @@ async def ingest_pdf(
     existing = await _load_fingerprints()
     candidates = dedup_mod.compare_fingerprints(fingerprint, existing)
     top = candidates[0] if candidates else None
+    logger.info("dedup check for %s: %s existing papers, best score %.4f",
+                filename, len(existing), top.score if top else 0.0)
 
     if top and top.same_paper and not allow_duplicate:
         recommendation = dedup_mod.recommend_version(fingerprint, top)
         diff = await _version_diff(top.fingerprint.paper_id, parsed.full_text)
         await _emit(channel, "duplicate", duplicate_of=top.fingerprint.paper_id,
                     recommendation=recommendation, reasons=top.reasons)
+        # The placeholder row must not survive a rejected upload.
+        await _drop_placeholder(paper_id)
         return UploadOutcome(
             paper_id=paper_id, status="duplicate", duplicate=True,
             duplicate_of=top.fingerprint.paper_id, recommendation=recommendation,
@@ -164,6 +183,14 @@ async def ingest_pdf(
     await _emit(channel, "status", status="done", message="解析完成", paper_id=paper_id,
                 page_count=parsed.page_count, is_scanned=parsed.is_scanned)
     return UploadOutcome(paper_id=paper_id, status="ok", duplicate=False)
+
+
+async def _drop_placeholder(paper_id: str) -> None:
+    """Remove the "parsing" placeholder row of a rejected upload."""
+    async with session_scope() as db:
+        paper = await db.get(Paper, paper_id)
+        if paper is not None and paper.status != "ready":
+            await db.delete(paper)
 
 
 async def _document_embedding(parsed: pipeline.ParsedDocument) -> list[float] | None:
@@ -252,13 +279,23 @@ async def _persist(
             "columns": "two-column" if _is_two_column(parsed) else "single-column",
         }
 
+        # Materialise the parent row *before* the children are queued.
+        #
+        # The unit of work derives the INSERT order from the ORM dependency
+        # graph.  Every child table carries a ForeignKey("papers.id"), but a
+        # bare ForeignKey alone does not create a dependency edge, so the ORM
+        # is free to emit a child INSERT before the parent row exists and
+        # SQLite then rejects the whole flush with "FOREIGN KEY constraint
+        # failed".  Flushing the parent explicitly removes the ambiguity.
+        await db.flush()
+
         # Sections
         section_ids: dict[str, str] = {}
         for sec in parsed.sections:
             sid = uuid.uuid4().hex
             section_ids[f"{sec.get('page_no')}:{sec.get('order_index')}"] = sid
             db.add(Section(
-                id=sid, paper_id=paper_id, parent_id=None, level=sec.get("level", 1),
+                id=sid, paper=paper, parent_id=None, level=sec.get("level", 1),
                 number=sec.get("number", ""), title=sec.get("title", ""),
                 page_start=sec.get("page_no", 0), page_end=sec.get("page_no", 0),
                 bbox=sec.get("bbox", []), content=sec.get("content", ""),
@@ -268,28 +305,28 @@ async def _persist(
         # Blocks
         for i, b in enumerate(parsed.blocks):
             db.add(ContentBlock(
-                id=uuid.uuid4().hex, paper_id=paper_id, section_id=None,
+                id=uuid.uuid4().hex, paper=paper, section_id=None,
                 page_no=b.get("page_no", 0), block_type=b.get("block_type", "text"),
                 bbox=b.get("bbox", []), content=b.get("content", ""), order_index=i,
             ))
 
         for t in parsed.tables:
-            db.add(PaperTable(id=uuid.uuid4().hex, paper_id=paper_id,
+            db.add(PaperTable(id=uuid.uuid4().hex, paper=paper,
                               page_no=t.get("page_no", 0), caption=t.get("caption", ""),
                               markdown=t.get("markdown", ""), csv_text=t.get("csv", ""),
                               bbox=t.get("bbox", [])))
         for f in parsed.figures:
-            db.add(PaperFigure(id=uuid.uuid4().hex, paper_id=paper_id,
+            db.add(PaperFigure(id=uuid.uuid4().hex, paper=paper,
                                page_no=f.get("page_no", 0), caption=f.get("caption", ""),
                                image_path=f.get("image_path", ""), bbox=f.get("bbox", []),
                                description=f.get("description", "")))
         for fx in parsed.formulas:
-            db.add(PaperFormula(id=uuid.uuid4().hex, paper_id=paper_id,
+            db.add(PaperFormula(id=uuid.uuid4().hex, paper=paper,
                                 page_no=fx.get("page_no", 0), latex=fx.get("latex", ""),
                                 raw_text=fx.get("raw_text", ""), bbox=fx.get("bbox", [])))
         for r in parsed.references:
             db.add(PaperReference(
-                id=uuid.uuid4().hex, paper_id=paper_id,
+                id=uuid.uuid4().hex, paper=paper,
                 index_in_doc=r.get("index_in_doc", 0), raw_text=r.get("raw_text", ""),
                 authors=r.get("authors", []), title=r.get("title", ""),
                 year=r.get("year"), venue=r.get("venue", ""), doi=r.get("doi", ""),
@@ -300,7 +337,7 @@ async def _persist(
         chunk_rows: list[Chunk] = []
         for c in chunk_list:
             row = Chunk(
-                id=uuid.uuid4().hex, paper_id=paper_id, section_id=None,
+                id=uuid.uuid4().hex, paper=paper, section_id=None,
                 ordinal=c.ordinal, page_no=c.page_no, char_start=c.char_start,
                 char_end=c.char_end, content=c.content,
                 token_count=c.token_estimate, kind=c.kind,
@@ -313,7 +350,7 @@ async def _persist(
 
         # Version history
         db.add(PaperVersion(
-            id=uuid.uuid4().hex, paper_id=paper_id, version_label=meta.version_label,
+            id=uuid.uuid4().hex, paper=paper, version_label=meta.version_label,
             filename=filename, file_hash=paper.file_hash, content_hash=paper.content_hash,
             page_count=parsed.page_count, char_count=len(parsed.full_text),
             is_current=True,

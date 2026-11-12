@@ -17,7 +17,7 @@ from app.parsing.references import citation_context, find_intext_citations
 from app.services import papers as paper_service
 from app.services import translation as translation_service
 from app.storage.db import session_scope
-from app.storage.models import Chunk, PaperReference, Translation
+from app.storage.models import Chunk, Paper, PaperReference, Translation
 
 router = APIRouter(prefix="/reader", tags=["reader"])
 
@@ -174,7 +174,12 @@ async def document_translation(paper_id: str, target_lang: str = "zh") -> dict:
         for s in segments
     )
     async with session_scope() as db:
-        db.add(Translation(id=uuid4(), paper_id=paper_id, locale=target_lang,
+        paper = await db.get(Paper, paper_id)
+        if paper is None:
+            # The FK on ``translations.paper_id`` would reject the insert; fail
+            # with a clear 404 instead of a 500.
+            raise HTTPException(status_code=404, detail="paper not found")
+        db.add(Translation(id=uuid4(), paper=paper, locale=target_lang,
                            markdown=markdown,
                            segments=[s.to_dict() for s in segments]))
     return {"paper_id": paper_id, "locale": target_lang, "markdown": markdown,
