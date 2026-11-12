@@ -77,16 +77,19 @@ def test_markdown_to_blocks_extracts_heading_levels() -> None:
     assert "Attention Is All You Need" in by_title
     assert by_title["Attention Is All You Need"].level == 1
     assert by_title["Abstract"].level == 2
-    assert by_title["1 Introduction"].number == "1"
+    # A printed number is split off into the ``number`` field.
+    assert by_title["Introduction"].number == "1"
+    assert by_title["Introduction"].level == 1
 
 
 def test_markdown_to_blocks_uses_printed_number_for_the_level() -> None:
     _blocks, candidates = markdown_to_blocks(OCR_PAGE_3, page_no=3)
     by_title = {c.title: c for c in candidates}
     # "### 3.2.1 ..." is a level-3 section even though the Markdown says "###".
-    assert by_title["3.2.1 Scaled Dot-Product Attention"].level == 3
-    assert by_title["3.2.1 Scaled Dot-Product Attention"].number == "3.2.1"
-    assert by_title["3.2 Attention"].level == 2
+    assert by_title["Scaled Dot-Product Attention"].level == 3
+    assert by_title["Scaled Dot-Product Attention"].number == "3.2.1"
+    assert by_title["Attention"].level == 2
+    assert by_title["Attention"].number == "3.2"
 
 
 def test_markdown_to_blocks_strips_the_hash_prefix() -> None:

@@ -118,8 +118,9 @@ def test_chunk_stats_sums_tokens() -> None:
                  "page_no": 1, "content": body}]
     chunks = chunk_document(full_text=body, sections=sections, blocks=[{"content": body, "page_no": 1}])
     stats = chunk_stats(chunks)
-    assert stats["chunks"] == len(chunks)
-    assert stats["tokens"] > 0
+    assert stats["count"] == len(chunks)
+    assert stats["total_chars"] > 0
+    assert stats["avg_tokens"] > 0
 
 
 # ------------------------------------------------- optional dense channel

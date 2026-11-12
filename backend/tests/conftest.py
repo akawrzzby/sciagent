@@ -36,6 +36,13 @@ def _isolated_env(tmp_path_factory: pytest.TempPathFactory) -> None:
     os.environ.setdefault("DATABASE_URL", f"sqlite+aiosqlite:///{root / 'test.db'}")
     os.environ.setdefault("ENVIRONMENT", "test")
     os.environ.setdefault("RERANKER_ENABLED", "false")
+    # The test suite must never reach out to the network: huggingface.co is
+    # unreachable from many CI networks and the connection attempt would block
+    # for minutes before timing out.
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+    os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+    os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
 
 # ------------------------------------------------------------------ blocks
