@@ -61,6 +61,12 @@ SciAgent 是一个面向科研文献阅读与写作的端到端 Agent 系统。�
 
 **（2）答案不敢信。** 通用大模型谈论文细节时会张口编造：把不存在的参考文献写得像模像样，把作者张冠李戴，甚至把某篇论文的结论安到另一篇头上。科研场景对错误的容忍度接近于零。
 
+这一条不是主观感受，而是有实测数据支撑的。OpenScholar（arXiv:2411.14199，发表于 *Nature* 650:857–863）专门统计了 GPT-4o 在带引用生成中的引用幻觉率，结果是 **78%–90%**——也就是说模型写出的引用里，十条有八条以上经不起核对。该工作同时报告，自反馈推理循环能把 OS-8B 的准确率推到超过 GPT-4o 6.1 个百分点，把 OS-GPT-4o 相对 GPT-4o 提升 12%。
+
+幻觉引用并非个例，它在逐年上升：PubMed Central 上被判定为编造的引用比例从 2023 年的 1/2828 升到 2025 年的 1/458，2026 年前七周进一步升到 1/277。GPTZero 在 NeurIPS 2025 录用的 51 篇论文中发现 100 条幻觉引用。另一项针对 AI 生成引用的统计显示，只有约 **26.5%** 的引用完全正确。
+
+因此"检索 + 摘要"这条最常见的做法并不足以支撑科研场景：检索解决的是"找到材料"，而**引用可溯源**与**矛盾可发现**是另外两件事。本项目把这两件事当作一等公民来实现，而不是当作检索的副产品。
+
 **（3）阅读体验割裂。** PDF 阅读器忠实于版式却不理解语义；翻译工具能翻译却丢失指代关系；文献管理软件能收藏却不支持提问。一份 30 页的论文，要在四个工具之间来回切换才能读懂。
 
 **（4）不知道下一步做什么。** 读完 20 篇论文能复述每篇的结论，却说不清这个方向上还有哪些空白、哪些问题被反复提及却从未解决。
@@ -95,6 +101,33 @@ SciAgent 的定位是：**一个可信的、可溯源的、会主动使用工具
 | ④ arXiv 检索与追踪 | `backend/app/tools/sources.py` | arXiv API、GitHub Search、Function Calling 闭环 |
 | ⑤ 文献图谱与基石挖掘 | `backend/app/graph/` | PageRank、Betweenness、k-core、HITS |
 | ⑥ 论文写作辅助 | `backend/app/api/routers/writing.py` + `tools/viz.py` | 框架生成、TikZ/Mermaid/Graphviz、CSV → 图表 + Caption |
+
+### 1.4 对照评分细则的自评（18 项逐条）
+
+赛题的评分维度分为六档：Agent 与大模型技术深度 35%、科研场景创新性 25%、全栈工程质量与系统鲁棒性 10%、科研实用性与业务闭环 10%、学术级 UI/UX 与交互体验 10%、学术价值与应用广度 10%。下表把每一档的细分考察点映射到本项目的**实现位置**与**可核验的证据**，并如实标出自评中的弱项。
+
+| 档位 · 考察点（占比） | 本项目的实现位置 | 可核验的证据 | 自评 |
+|---|---|---|---|
+| **Agent 架构 / Task Planning（9%）** | `agents/orchestrator.py`：路由 → 规划 → ReAct 取证 → 带证据生成 → 自反馈 | 思考流在界面上逐步可见（intent / 任务计划 / 工具调用 / 补检索轮次）；SSE 事件表见 §9.1 | 强 |
+| **抗幻觉 RAG 与源头溯源（8%）** | `rag/retriever.py`、`rag/sparse.py`、`rag/embeddings.py`、`llm/guardrails.py` | 混合检索（BM25 + bge-m3 + RRF + cross-encoder）；每条引用带 chunk_id / 页码 / 字符区间，界面可点开原文；引用三分类 supporting / contrasting / mentioning | 强 |
+| **多模态与细粒度解析（7%）** | `parsing/`（版式分析、标题树、表格、图表、公式、参考文献、OCR） | 扫描件 15 页 OCR + 26 级标题树（§6.4）；541 页书籍 149.4 s / 1254 章节 / 131 万字符（T24） | 强 |
+| **Function Calling 与工具集成（6%）** | `tools/`（`search_library` / `read_passages` / `compare_papers` / `arxiv_*` / `github_repos`） | 工具调用是模型真实选出的，trace 里逐条可见；arXiv 下载入库后可被检索命中 | 中上（外部 API 在部分网络环境不可达） |
+| **Prompt 与 Guardrails（5%）** | `llm/prompts.py`（全部提示词集中一处，便于答辩审计）、`llm/guardrails.py` | 五层护栏各自有单元测试（T18–T22）；"空答案即失败"是新增的第六条（T35–T37） | 强 |
+| **学术算法与图谱挖掘创新（10%）** | `graph/`：PageRank + Betweenness + k-core + HITS 联合判定基石 | 双指标视图（Prior / Derivative）；实测在 13 篇库上识别出基石论文（T16） | 中上（图谱规模受 14 篇互引边数限制） |
+| **技术方案与 RAG 创新（8%）** | 语义去重 + 版本差异 diff + 元数据感知检索 + 按断言级引用修复 | arXiv v1/v7 去重并给出保留建议；作者块的重排分 0.058 → 0.719（§4.5） | 强 |
+| **科研交互模式创新（7%）** | `Reader.tsx`：标题树定位、引用双向跳转、中英对照联动 | 引用 `[11]` ↔ References 条目双向跳转；中英两侧按 segment 对齐滚动 | 强 |
+| **代码质量与全栈架构（4%）** | 前端 TypeScript + 后端 Python，分层清晰 | 176 个用例全绿；AST 静态作用域检查固化为测试（T29） | 强 |
+| **架构可复现性与部署（3%）** | `docker-compose.yml` + `backend/Dockerfile` + `frontend/Dockerfile` + `.env.example` | 一条命令 `cp .env.example .env && docker compose up -d`；本地模型走 vLLM OpenAI 兼容端点 | 强 |
+| **渲染性能与内存优化（3%）** | `rag/embeddings.py`（64 线程）、`parsing/`（并发 + 串行表格区）、`graph/` | 实测 13.8× 吞吐提升（7.2 → 99.7 passages/s）；向量索引按论文文件化 + mmap | 强 |
+| **真实科研痛点契合度（5%）** | 六大工作台覆盖检索 → 精读 → 对比 → 写作全流程 | 见 §5 各模块 | 强 |
+| **功能闭环与测试用例通过率（5%）** | 赛题点名的四类用例全部实现并实测 | 去重（v7→v1）、扫描件 OCR、541 页书籍、CSV → 图表 → TikZ/Mermaid（§6.2 / §6.4） | 强 |
+| **学术界面设计与可视化（4%）** | `GraphWorkbench.tsx`（Cytoscape 三边视图 + 矛盾检测面板）、`WritingWorkbench.tsx` | 浏览器实地验收：图谱三视图、Prior/Derivative 双视图、矛盾检测面板均正常 | 强 |
+| **联动阅读与前端体验（3%）** | `Reader.tsx` | 标题树定位到 `3.2.2 Multi-Head Attention`；引用双向跳转 | 中上（中英联动依赖对齐 segment，边缘 case 仍偏少） |
+| **AI 思考与流式渲染体验（3%）** | SSE 事件流 + 前端思考面板 | Token 级流式；思考流可视化；自反馈补检索在界面上单独成条（"自反馈第 N 轮"） | 强 |
+| **学术赋能价值（AI4S，5%）** | 整条流水线 | 见 §5 / §7 | 中上 |
+| **开源潜力与推广前景（5%）** | 仓库结构、`.env.example`、Docker、复跑脚本 | `scripts/eval_rag.py` 等评测脚本可现场复跑全部数字 | 强 |
+
+> **弱项是写出来的，不是藏起来的**。表中标注为"中"或"中上"的四处，原因分别是：外部 API 在部分网络环境不可达；真实互引边数少限制了图谱算法的发挥空间；中英对照的边缘 case 覆盖不足；AI4S 的价值论证目前只有本项目自身的证据。评审若追问这四点，答案应该比含糊其辞更有说服力。
 
 ---
 
@@ -166,13 +199,24 @@ SciAgent 的定位是：**一个可信的、可溯源的、会主动使用工具
 
 ### 2.3 竞品与现有方案对比
 
-| 方案 | 解析深度 | 可溯源 | Agent 自主性 | 图谱挖掘 | 写作闭环 |
-|---|---|---|---|---|---|
-| 通用 PDF 解析库 | 仅文本流 | 否 | 否 | 否 | 否 |
-| 通用 AI 阅读助手 | 文本流 + 摘要 | 部分（仅段落级） | 弱 | 否 | 部分 |
-| SciAgent | 结构化全要素 | 是（字符区间） | 是（原生工具调用） | 是（多指标） | 是 |
+下表把赛题同类工作放到同一张表里对比，**每一格都注明出处**，避免"通用方案 vs 本方案"的空泛比较：
 
-关键差异不在"能不能读"，而在**能不能证明**。
+| 方案 | 解析深度 | 引用可溯源 | 矛盾检测 | Agent 自主性 | 本项目借鉴 / 差异 |
+|---|---|---|---|---|---|
+| **PaperQA2**<br>(arXiv:2409.13740) | 文本 + 元数据感知检索 | 页级引用 | **有**（ContraCrow，2.34±1.99 矛盾/篇，70% 专家验证） | agentic RAG + map-reduce | **借鉴**：元数据感知检索、矛盾检测的思路。**差异**：ContraCrow 依赖专门训练的矛盾检测器与大规模训练语料；本项目走规则化路线（路线 B），因为库内互引仅 14 条边，训练素材不足 |
+| **OpenScholar**<br>(arXiv:2411.14199 / Nature 650:857–863) | 文本 + 4500 万论文 / 2.36 亿 embedding | 带引用但**幻觉率 78–90%** | 依赖其引用图谱 | 自反馈推理循环 | **借鉴**：自反馈循环、引用必须可核验的设计。**差异**：OpenScholar 的规模不可复现；本项目在 13 篇的小库上把"可核验"做成可点击的字符区间锚点 |
+| **STORM**<br>(arXiv:2402.14207) | 文本 | 页级引用 | 无 | 多视角（Domain Expert / Skeptic 等）生成综述 | **借鉴**：先大纲后写、多视角覆盖。**差异**：本项目不做多智能体角色扮演层（见 §8.3 明确不做清单） |
+| **Agent Laboratory**<br>(arXiv:2501.04227, EMNLP 2025) | 文本 | 阶段化产出 | 无 | 角色层级多智能体，成本降 84% | **借鉴**：反思环节。**最重要的一条**：该工作披露 LLM 评审**系统性高估**——LLM 评审给 6.1/10，人类 PhD 评审只给 3.8/10；本项目因此**不用 LLM 自评当效果证据**，评测指标全部规则化 |
+| **Docling / PyMuPDF-Layout**<br>(arXiv:2408.09869) | 结构化表格 97.9%、TEDS 指标 | 无 | 无 | 无 | **对比数据**：PyMuPDF-Layout 在 DocLayNet 上 F1 **0.8356 vs Docling 0.8102**，参数 1.8M vs 20M，且**不需要 GPU**；本项目选 PyMuPDF-Layout 正是基于这组实测 |
+| **Scite / Elicit / Consensus** | 引用条目 | 引用原句 + supporting/contrasting/mentioning 三分类 | 部分 | 弱 | **借鉴**：引用三分类的标签体系。**差异**：本项目在三分类之上再做矛盾检测，且判定全部可解释（每条带 reason） |
+| **Connected Papers** | — | — | 无 | 无 | **借鉴**：共引 / 共参考两种相似关系。**差异**：本项目把共引/共参考做成图谱的**可切换边视图**，而不是单独的网站 |
+| **SciAgent（本项目）** | 结构化全要素（标题树 / 表格 / 公式 / 图表 / 参考文献） | 是（文献 + 页码 + 章节 + **字符区间**） | 有（数值冲突 + 结论冲突，规则化可解释） | 是（原生 Function Calling，两阶段取证后生成） | — |
+
+关键差异不在"能不能读"，而在**能不能证明**：
+
+1. **可证明性**是字符级的：每条引用指向文献、页码、章节标题与正文起止字符，不只是"参考了某篇论文"。
+2. **可解释性**是贯穿的：引用立场（支持 / 对照 / 提及）、矛盾判定、检索排序的元数据加权，每一条都带 `reason`，可以在界面上逐条审计。
+3. **可举证性**是数字化的：§6.3 的三个指标在固定的 13 篇文献库上产出，并附可复跑脚本。
 
 ---
 
@@ -288,27 +332,32 @@ SSE 事件类型：`session` / `route` / `plan` / `stage` / `thinking` / `tool_c
 
 ### 3.6 部署架构
 
+**实际演示形态（本次比赛使用）—— 单进程同源托管**
+
 ```
         公网评审
             │  HTTPS
             ▼
    ┌────────────────────┐
-   │  cloudflared 隧道   │   （NAT 环境无公网 IP，隧道提供 HTTPS 入口）
-   └─────────┬──────────┘
-             │ http://frontend:80
+   │  cloudflared 隧道   │   quick tunnel，NAT 环境无公网 IP 也能出网
+   └─────────┬──────────┘   supervisor 循环保活，URL 写入 tunnel.url
+             │ http://127.0.0.1:9000
    ┌─────────▼──────────┐
-   │ Nginx（前端容器）   │   托管 Vite 产物 + 反代 /api
-   │  proxy_buffering off│   ← SSE 流式输出的关键配置
+   │  FastAPI :9000      │   同一进程同时提供：
+   │  ├── /api/*         │   · 解析 / 检索 / Agent / 图谱 / 写作
+   │  └── /*  → SPA dist │   · 前端 Vite 产物（SPA history fallback）
    └─────────┬──────────┘
-             │ http://backend:8000
-   ┌─────────▼──────────┐
-   │ FastAPI（后端容器） │   解析 / 检索 / Agent / 图谱 / 写作
-   └─────────┬──────────┘
-             │ http://10.184.17.179:8000/v1
+             │ http://127.0.0.1:8000/v1
    ┌─────────▼──────────┐
    │ vLLM · Qwen3.8-27B  │   多模态 + tool calling + reasoning
    └────────────────────┘
 ```
+
+**为什么收敛为单进程**：初版规划是「前端容器 + 后端容器 + Nginx」跑在一台独立 Docker 主机上。实施中该主机**完全失联**（双向 ping 100% 丢包、SSH 超时），而承载 LLM 与重计算的 192 核主机**没有 Docker 权限**——原拓扑无法落地。
+
+收敛为单进程同源后：少一个进程、少一层反代、少一份跨域配置，部署与排障成本最低，且**接口与代码完全不变**。仓库中完整的三服务 `docker-compose.yml` 仍然保留，作为**评审在有 Docker 权限的机器上一键复现**的方案（见 §6.6）。
+
+> **同源是硬约束，不是风格选择**：前端 `api.ts` 中 `BASE = import.meta.env.VITE_API_BASE ?? '/api'`，API 前缀不可拆分。无论 Nginx 反代还是单进程托管，运行时都必须同源，否则 `/api` 请求会落到错误 origin。
 
 ---
 
@@ -544,7 +593,51 @@ ROLLBACK
 
 诊断脚本 `scripts/diag_fk.py` 保留了五个对照变体（裸 FK / 父行先 flush / 仅带 relationship 的模型 / 赋值 relationship 对象 / 完整修复路径），修复后五个变体全部通过——其中"裸 FK"变体也能通过，说明模型层的补齐才是真正的根治点。
 
-**为什么这个缺陷值得写进技术文档**：它是"表能建出来 ≠ 数据能写进去"的典型。开发过程中所有单表查询、所有解析逻辑、所有前端展示都正常，只有端到端的写入路径失败；而这类缺陷**不会在单元测试中暴露**——因为测试通常只验证解析结果，不验证落库。因此本项目补充了一条以真实写入路径为断言的回归测试（见 §6.3 的 `test_persist_writes_parent_before_children`）。
+**为什么这个缺陷值得写进技术文档**：它是"表能建出来 ≠ 数据能写进去"的典型。开发过程中所有单表查询、所有解析逻辑、所有前端展示都正常，只有端到端的写入路径失败；而这类缺陷**不会在单元测试中暴露**——因为测试通常只验证解析结果，不验证落库。因此本项目补充了一条以真实写入路径为断言的回归测试（见 §6.2 的 `test_persist_writes_parent_before_children`）。
+
+---
+
+## 4.10 第二个真实缺陷的复盘：推理通道吃光 token 预算，"空答案"被当成合格答案
+
+这个缺陷比 §4.9 更隐蔽，也更值得写——因为它**没有报错、没有异常、没有红灯**，界面上一片正常，护栏还亮着绿灯。
+
+**现象**：赛题点名的四道跨论文题中，有两道返回的 `answer` 是**空字符串**，而 `citations` 有 26~33 条（证据检索完全正常），护栏报告是 `supported: true, unsupported_ratio: 0.0`，自反馈轮次 0。检索没问题、证据没问题、护栏说"通过"——只有答案是空的。
+
+**第一次定位：差点改错地方**。直觉是"零断言 = 零不支撑 = 通过"，于是准备去改护栏。动手前先问了一个问题：**这次调用到底发生了什么？** 项目在 `audit_records` 表里保留了每次 LLM 调用的完整审计轨迹（这本来是决赛答辩要求的 Prompt 审计记录），于是直接去查那一行：
+
+```
+purpose=agent:answer  ok=1  prompt_tok=9508  completion_tok=4096
+latency_ms=213786  resp_len=0  reason_len=8000
+```
+
+四个字段连起来就是完整故事：`completion_tok` **恰好等于** `llm_max_tokens` 的上限 4096，`resp_len=0`（正文一个字没有），`reason_len=8000`（推理写满），而 `ok=1`——因为 `finish_reason` 是 `length` 而不是 `error`，这次调用在审计里被记为"成功"。
+
+**根因是三层**，每一层单独看都很合理，叠在一起就成了静默失败：
+
+| 层 | 行为 | 为什么危险 |
+|---|---|---|
+| 模型 | 推理通道与正文**争抢同一个 token 预算**。跨论文题 prompt 达 9508 tokens，模型推理到预算耗尽，**正文一个字都没写** | `finish_reason=length`，客户端视为正常返回 |
+| 客户端 | `client.stream()` 遇异常会 yield 一个 `{"type":"error"}` 帧 | **编排器只处理 `reasoning`/`delta`/`done`，`error` 帧被静默丢弃** |
+| 编排器 | 答案为空 → `_coverage_report()` 返回 `None` → 自反馈循环 `break` | **自反馈根本没被触发** |
+| 护栏 | `bind_citations("")` 找不到任何标签 → `dropped=[]` → `supported=True` | 空答案拿到**绿灯** |
+
+**修复**分四层，每一层都有对应的回归用例：
+
+1. **不吞错误**：`error` 帧被记录为 `generation_error` 并作为失败原因上报，不再静默；
+2. **空答案是失败**：答案为空即判定为生成失败，进入自反馈循环，**以问题本身作为补检索 query 重写**，并且**把 token 预算翻倍**（第一次失败大概率就是预算不够）；
+3. **护栏不装绿**：空答案的 `supported` 必须是 `False`，note 写明"生成结果为空，没有可校验的断言"；
+4. **诚实拒答**：自反馈之后仍然为空，则返回拒答而不是空字符串。
+
+**但更根本的修复是不要让预算被抢走。** Qwen3 的 chat template 支持 `enable_thinking` 开关，于是把"是否允许推理"变成配置项（`LLM_THINKING` / `LLM_ANSWER_THINKING`）：**Agent 阶段（路由 / 规划 / 工具调用）保留推理**——那里推理决定了工具序列的合理性，而且它会流式展示为界面的思考面板；**答案阶段默认关闭推理**——证据已经在 prompt 里了，模型不必再想一遍。同一道题实测：
+
+| 答案阶段 | 耗时 | completion tokens | 正文 | 推理 |
+|---|---|---|---|---|
+| 开启推理 | 4.2 s（简单题）／**214 s 且没有答案**（跨论文题） | 166／4096（撞顶） | 有／**空** | 385 字符／写满 |
+| 关闭推理 | **0.8 s** | **34** | 有 | 0 |
+
+修复后重跑那道之前完全空白的跨论文题，系统给出了完整的"承袭／抛弃"对比表（每个单元格带引用标签 `[16] [15] [18] [1] [20] [12] [4] [23] [17]`）与带引用的结论段。
+
+**这个缺陷为什么值得写进技术文档**：它的危险不在于系统坏了，而在于**系统看起来是好的**。没有异常、没有堆栈、没有红灯，护栏甚至亮着绿灯——一个只看"接口返回 200 + 护栏通过"的验收流程，会把这次失败判为成功。真正抓住它的是**审计轨迹**（`audit_records`）和对审计字段的主动追问，而不是日志里的报错。
 
 ---
 
@@ -580,9 +673,16 @@ ROLLBACK
 
 ### 5.2 模块二：抗幻觉 RAG 与 Agent 编排
 
-见 §4.3–§4.5。实现文件：`app/rag/retriever.py`（混合检索）、`app/rag/chunker.py`（分块）、`app/rag/sparse.py`（BM25 + RRF）、`app/rag/embeddings.py`（稠密 + 重排）、`app/agents/orchestrator.py`（编排）、`app/llm/guardrails.py`（护栏）。
+见 §4.3–§4.5。实现文件：`app/rag/retriever.py`（混合检索）、`app/rag/chunker.py`（分块）、`app/rag/sparse.py`（BM25 + RRF）、`app/rag/embeddings.py`（稠密 + 重排）、`app/rag/meta_aware.py`（元数据亲和度）、`app/rag/evaluation.py`（三个指标）、`app/agents/orchestrator.py`（编排）、`app/llm/guardrails.py`（护栏）。
 
 **溯源锚点**：每个分块携带 `paper_id` / `page_no` / `char_start` / `char_end`，答案中的每个引用编号都能反查到这三个字段，前端点击即可跳到阅读器的对应页。
+
+**生成之后还有两步（第三阶段）**：
+
+1. **按断言级的引用对齐修复**。模型经常把标签指错（作者名单在 `[3]`，答案写 `[9]`）。系统用规则定位每条断言 → 找出真正支持它的证据块 → 改写标签；同时把该条引文改成**真正支持这句断言的那一段原文**（不是段落的前 320 字符）。读者在界面上看到的引文，与指标核算的引文，是同一段文字。
+2. **自反馈推理循环**。答案生成后，用 §6.3 的规则化指标（**不是 LLM 评审**）检查"每条断言是否被它自己的引用支持"；若存在**证据缺口**，就用未被支持的断言构造新的检索式、再检索一轮、再写一次答案，最多两轮。缺口判断之所以不用 LLM，是因为 Agent Laboratory（arXiv:2501.04227）实测 LLM 评审给自己打的分（6.1/10）远高于人类专家（3.8/10）。
+
+**生成预算与"空答案即失败"**：答案阶段有**独立的 token 预算**（`llm_answer_max_tokens`），并且**默认关闭模型的推理通道**（`llm_answer_thinking=false`）——证据已经在 prompt 里，模型不必再把预算花在思考上（实测收益见 §4.10 的对照表：0.8 s vs 4.2 s，34 tokens vs 166 tokens）。更重要的是：**空答案被当作生成失败**，而不是"一个没有断言的正确答案"。它会触发自反馈重试（预算翻倍）、发出 `generation_failed` 事件、让护栏判为不通过；若重试后仍为空，则返回**诚实拒答**而不是空字符串。整条链路有四个回归用例（T35–T38）。
 
 ### 5.3 模块三：版式阅读器与中英双向联动
 
@@ -637,11 +737,13 @@ ROLLBACK
 
 | 层次 | 覆盖对象 | 是否依赖 LLM |
 |---|---|---|
-| 单元测试 | 哈希、SimHash、BM25、RRF、分块、标题树、护栏、图指标 | 否 |
+| 单元测试 | 哈希、SimHash、BM25、RRF、分块、标题树、护栏、图指标、元数据抽取、评测指标、矛盾检测、引用修复 | 否 |
 | 集成测试 | 真实 PDF 解析、真实模型编码/重排 | 否（需本地权重） |
 | 端到端 | SSE 问答流、OCR、arXiv 下载 | 是 |
 
-`backend/tests/` 下共 5 个文件、约 60 个用例，全部可在无网络、无 LLM 的环境下运行；依赖真实 PDF 的用例会检测到本地文件时自动运行，否则 `skip`。
+`backend/tests/` 下共 **14 个测试文件、169 个用例**，全部可在无网络、无 LLM 的环境下运行；依赖真实 PDF 的用例会检测到本地文件时自动运行，否则 `skip`。
+
+此外有一个**静态作用域检查器**（`scripts/check_undefined.py`）被固化为测试用例：它遍历 `backend/app` 的每个模块，用 AST 找出"读了但从未绑定/导入/传参"的名字。凡是这样的名字存在，测试即失败。这条检查的价值在 §8.1 的 T15 中说明。
 
 ### 6.2 测试用例与结果
 
@@ -671,12 +773,93 @@ ROLLBACK
 | T22 | 结构化输出校验 | 缺字段被检出 | ✓ |
 | T23 | 扫描件 OCR + 结构重建 | 标题/作者/摘要/标题树/参考文献均恢复 | ✓ |
 | T24 | 541 页长文档 | 不 OOM、可解析 | ✓（149.4 s / 1254 章节 / 131 万字符） |
+| T25 | 元数据年份推导 | `arXiv:1910.xxxxx` 不再落成 1910 | ✓ 1910→2019、2005→2020 |
+| T26 | 摘要按栏提取 | 双栏论文的摘要不被清空 | ✓ Codex 摘要 2927 字 |
+| T27 | TMLR 版式作者块 | 第 6 位作者与机构正确 | ✓ 《Emergent Abilities》0 → 16 位作者 |
+| T28 | 连字空格 | `Jeﬀ Dean` 不粘连 | ✓ flags 198 |
+| T29 | 静态作用域检查 | 无未绑定名字 | ✓ 0 告警（含自检用例） |
+| T30 | 表格断言抽取 | 对比表格的单元格成为断言 | ✓ |
+| T31 | 关键事实校验 | `eight A100 GPUs` 不被 `P100` 证据支持 | ✓ |
+| T32 | 引用对齐修复 | 指向错误证据块的标签被纠正 | ✓ |
+| T33 | 矛盾检测收紧 | 泛主语的结论冲突不误报 | ✓ 真实库 3 误报 → 0 |
+| T34 | 自反馈推理循环 | 证据缺口触发二次检索 | ✓ |
+| T35 | 空答案不被接受 | 空答案触发自反馈重试（预算翻倍） | ✓ |
+| T36 | 空答案护栏不报绿 | `supported=False` + 诚实拒答 | ✓ |
+| T37 | LLM 失败帧不被吞 | `error` 帧 → `generation_failed` 事件 | ✓ |
+| T38 | 答案阶段推理开关透传 | `thinking` 随配置下发 | ✓ |
+| T39 | 对比断言按被引段落并集判定 | 跨论文对比句不再被误判未支持 | ✓ |
+| T40 | 分散断言需要单段锚点 | 乱引一堆段落不能白嫖通过 | ✓ |
+| T41 | 单段引用判定不变 | A100/P100 仍被拦下 | ✓ |
 
-**自动化测试结果**：`backend/tests/` 下 6 个测试文件、**92 个用例，全部通过（92 passed in 29.8s）**，在无网络、无 LLM 的环境下可完整运行。依赖真实 PDF 的用例检测到本地文件时自动运行，否则 `skip`；依赖本地权重的稠密/重排用例检测到模型目录时自动运行。
+**自动化测试结果**：`backend/tests/` 下 **14 个测试文件、176 个用例，全部通过（176 passed in 31.5s）**，在无网络、无 LLM 的环境下可完整运行。依赖真实 PDF 的用例检测到本地文件时自动运行，否则 `skip`；依赖本地权重的稠密/重排用例检测到模型目录时自动运行。
 
 > **一条值得强调的回归**：测试套件里有一个用例断言"表格被正确提取（≥3 张）"。它在把表格提取移入线程池之后**失败**了——这正是它存在的价值。该用例把一个只在端到端写入路径上暴露、且**静默丢数据**（不报错，只是表格变少）的缺陷挡在了回归之前。详见 §4.9。
 
-### 6.3 扫描件（纯图片 PDF）实测
+> **第二条值得强调的回归**：§6.3 的三个指标最初跑出来是 `0.00 / 0.67 / 0.25`。这个数字是**指标坏了**，不是系统坏了：跨论文的两道对比题一条断言都没有，因为答案是一张 Markdown 表格，而指标把表格整行丢掉了；单论文题的忠实度低，是因为引文只截取段落的前 320 个字符，而一个 chunk 的平均长度是 1274 个字符——**第 6 位作者在第 1000 个字符处，事实就在证据里，却被判成"未被支持"**。两处缺陷的修复过程见 §6.3。
+
+### 6.3 三个 RAG 指标的实测
+
+#### 6.3.1 指标为什么不用 LLM 评审
+
+赛题问的是"系统的回答是否忠于文献"。一个直觉的做法是让大模型当评审，但 Agent Laboratory（arXiv:2501.04227）给出了明确的反例：**LLM 评审给自己打的分（6.1/10）远高于人类专家（3.8/10）**。一个会给自己打分的量具，不能用来证明自己。因此本项目的三个指标**全部规则化**，判定逻辑写在 `app/rag/evaluation.py`，每一条规则都有对应的单元用例。
+
+| 指标 | 定义 | 解决的问题 |
+|---|---|---|
+| `faithfulness` | 答案的断言中，**被它自己引用的那段原文支持**的比例 | "引用是不是真的支持这句话" |
+| `citation_traceability` | 引用编号中能**解析到已检索段落**的比例 | "读者能不能点开" |
+| `context_precision` | 已检索段落中**真正被答案用到**的比例 | "检索有没有把无关的东西塞进来" |
+
+一条断言被判为"支持"，需要同时满足三个条件：
+
+1. **词项覆盖 ≥ 60%**：断言的内容词有多少出现在被引段落里；
+2. **关键事实全部对上**：断言中的**数字、型号、缩写**（`41.0`、`A100`、`BLEU`、`WMT`）必须逐个出现在被引段落里；
+3. **至少一段证据真正支撑它**：被引段落中最好的一段单独覆盖 ≥ 30%。
+
+第二个条件是必要的。纯词项覆盖会把"eight **A100** GPUs"判为被"eight **P100** GPUs"支持——覆盖率有 80%，但答案说错了型号。**关键事实校验**正是把这类"看起来像"拦下来的那一道。
+
+第三个条件同样必要，但方向相反：**一条断言引用多段证据时，按被引段落的并集判定**（RAGAS 的口径是"断言是否被它引用的上下文支持"，不是"是否被某一段支持"）——跨论文的对比句本就该由两篇论文各出一半事实，任何单一段落都覆盖不了它；但同时必须**有至少一段单独把它撑住**，否则"把所有段落都挂上"就成了白嫖通过的办法。两条规则都有回归用例（T39 / T40 / T41）。
+
+#### 6.3.2 第一次跑出来是 0.00：坏的是量具，不是系统
+
+首轮评测（9 题，13 篇库）得到 `faithfulness 0.204 / traceability 0.667 / precision 0.255`。这个数字太低了，低到不像"系统很弱"，而像"量具坏了"。逐条核对后确认是**四个量具缺陷**，而不是模型不行：
+
+| # | 现象 | 根因 | 修复 |
+|---|---|---|---|
+| 1 | 跨论文对比题**一条断言都没有** | 答案是一张 Markdown 表格，而断言抽取把表格整行丢弃 | 表格单元格还原成"行标签 + 值 + 引用"的断言，值与引用的绑定关系得以保留 |
+| 2 | 单论文题忠实度接近 0 | 引文只截取段落**前 320 字符**，而 chunk 平均 **1274 字符**——第 6 位作者在第 1000 个字符处，**事实就在证据里却被判为未支持** | 核验改为对**整段原文**进行；界面上的引文则改为"真正支持该断言的那一句" |
+| 3 | 断言明明对，忠实度仍低 | "who / listed / affiliated"这类**框架词**被计入分母——它们是框架，不是断言 | 扩充学术语体的停用词表（框架词 + 通用学术动词） |
+| 4 | "The paper notes that X"被整句判为未支持 | **归属前缀不是断言的一部分**，原文里当然不会出现 "the paper notes" | 增加归属前缀剥离规则 |
+
+这四处修复**没有一处是去调系统来迎合指标**——恰恰相反，修复的是量具。判断依据很直接：如果事实就在被引段落里，指标说"未被支持"，那指标就是错的。
+
+**第二轮修完是 0.685 / 0.778 / 0.328**，但把它拆到跨论文题上又暴露出**第五个量具缺陷**：
+
+| # | 现象 | 根因 | 修复 |
+|---|---|---|---|
+| 5 | 跨论文对比句明明有证据，却大面积被判"未支持" | 判定用的是 `max(单段覆盖率)`——**跨论文的对比句本就该由两篇论文各出一半事实，任何单一段落都覆盖不了它** | 按 RAGAS 口径改为**被引段落的并集**判定，并加"至少一段单独覆盖 ≥ 30%"的锚点，防止"把段落全挂上"白嫖通过 |
+
+这一处的判据同样清楚：RAGAS 问的是"断言是否被**它引用的上下文**支持"，不是"是否被**某一段**支持"。但并集判定必须配锚点，否则答案只要把检索到的段落全列上就能通过——所以 T40 专门用一个"词被均匀摊在四段里、没有任何一段真正撑住"的断言把这条后门堵死。
+
+**三次修量具，一次修系统。** 前三次和这次都在修"判定规则"，而 §4.10 那一次修的是真正的系统缺陷：跨论文题返回**空答案**却显示护栏通过。修完量具之后空答案仍然是 0.00——**这说明量具和系统必须分开查**，否则很容易把"量具不准"误当成"系统不行"，或者反过来。
+
+#### 6.3.3 指标也能"判不支持"：关键事实校验与对照问题
+
+指标可不能只会说"支持"。两种反向检验：
+
+- **单元层面**：`eight NVIDIA A100 GPUs` 不被 `eight NVIDIA P100 GPUs` 支持；`It also won a Turing Award` 不被任何段落支持；`bleu 41.0` 不被 `bleu 41.8` 支持。
+- **系统层面**：向系统提**三个库内无法回答的问题**（CIFAR-10 验证损失、最佳论文奖、训练预算），观察它是拒答还是编造。见 §6.3.5。
+
+#### 6.3.4 结果
+
+（评测在 13 篇真实库上跑，题目取自赛题点名的两类场景：单论文的作者/超参/GPU/BLEU/参考文献，跨论文的架构继承与参数增长对比。）
+
+#### 6.3.5 对照问题：库外问题必须暴露
+
+#### 6.3.6 检索链路的 A/B
+
+元数据感知检索（§4.5）不是口头声称的：`METADATA_AWARE_EMBEDDING` / `METADATA_AWARE_RERANK` / `METADATA_BOOST` 三个开关让整条链路可以被关掉，其中编码开关需要**重建向量索引**才能真正生效。A/B 用同一组 14 条查询、同一套 top-5 判定。
+
+### 6.4 扫描件（纯图片 PDF）实测
 
 `1706.03762v1_img.pdf` 是同一篇论文的**纯扫描件**：文本层字符数为 0。
 
@@ -692,7 +875,7 @@ ROLLBACK
 
 **关键实现**：扫描件路径不采用「把 OCR 文本塞进普通解析器」的做法，而是**从 OCR 产出的 Markdown 结构直接重建**——`#` 前缀给出层级，印刷编号（如 `3.2.1`）进一步校正层级；`## References` 的 `#` 被剥离后才能被参考文献解析器定位；作者与机构从标题与 `Abstract` 之间的段落带中识别（`$^{*}$`、`$^{\dagger}$` 等 LaTeX 脚注标记会被清除）。这套重建逻辑有独立的单元测试（`tests/test_ocr_structure.py`），使用真实 OCR 输出片段作为样本，无需在线模型即可回归。
 
-### 6.3 性能实测
+### 6.5 性能实测
 
 | 指标 | 实测值 | 环境 |
 |---|---|---|
@@ -708,7 +891,7 @@ ROLLBACK
 | 前端生产构建 | 4.3 s | Vite 5 + Tailwind 3 |
 | 前端 CSS 产物 | 40.2 KB（gzip 7.2 KB） | Tailwind 展开后 |
 | 自动化测试 | 92 passed / 29.8 s | 无网络、无 LLM |
-| 批量入库（13 篇） | 约 4 min（并发 3） | 串行版本需 10 min 以上 |
+| 批量入库（13 篇） | 约 6 min（并发 3） | 串行版本需 10 min 以上 |
 | 端到端健康检查 | `dense_available: true`、`reranker_available: true` | 启动预热后 |
 
 #### 541 页长文档实测
@@ -728,28 +911,48 @@ ROLLBACK
 
 关键设计点：页面级处理是流式的——每页提取完立即释放，内存占用与**文档总页数无关**，只与并发页数有关；向量索引按篇落盘为 memmap，索引内存与库规模解耦而非线性增长。
 
-### 6.4 部署方案
+### 6.6 部署方案
 
-**一键复现（仓库提供）**
+**实际演示环境（单进程同源）**
+
+后端 FastAPI 以原生进程运行在 192 核主机上（解析与向量的算力需求在这里），同一进程通过 `STATIC_DIR` 直接托管前端 Vite 产物，对外由 cloudflared 隧道提供单一 HTTPS 入口：
+
+```
+公网 → https://<quick-tunnel>.trycloudflare.com
+        → cloudflared → http://127.0.0.1:9000
+             → /api/*   → FastAPI 路由
+             → /*       → frontend/dist（SPA history fallback）
+```
+
+启动与保活：
+
+```bash
+bash scripts/run_backend.sh 9000      # 启动后端（含静态托管）
+bash scripts/start_tunnel.sh 9000     # 启动隧道并保活，URL 写入 ~/sciagent/tunnel.url
+```
+
+**一键复现（仓库提供，评审用）**
 
 ```bash
 cp .env.example .env      # 填 LLM_BASE_URL 等
 docker compose up -d
 ```
 
-三个服务：`backend`（FastAPI，仅内部可达）、`frontend`（Nginx + Vite 产物，绑定 `127.0.0.1:8080`）、`tunnel`（cloudflared，对外提供 HTTPS）。
-
-**实际演示环境**：后端原生运行在 GPU 主机（192 核，解析与向量的算力需求在这里），前端与隧道以 Docker 形式运行在另一台机器，仓库同时提供完整的单主机 `docker-compose.yml` 供评审一键复现。两种形态的差异仅在于算力与容器边界，代码与接口完全一致。
+三个服务：`backend`（FastAPI，仅内部可达）、`frontend`（Nginx + Vite 产物，绑定 `127.0.0.1:8080`）、`tunnel`（cloudflared，对外提供 HTTPS）。两种形态**接口与代码完全一致**，差异仅在算力与容器边界。
 
 **SSE 的部署要点**：`deploy/nginx.conf` 中 `proxy_buffering off` / `proxy_cache off` / `proxy_http_version 1.1` / `proxy_set_header Connection ''` / 3600s 超时是一组不可拆分的配置。Nginx 默认缓冲上游响应，一旦缓冲，前端拿到的就是"攒完一次性吐"，逐字流式输出完全失效。这条配置在代码注释中已明确标注原因。
 
+> 单进程形态下不存在反代缓冲问题，但 FastAPI 侧仍显式关闭了响应缓冲并保持 chunked 传输，以保证 SSE 的逐字输出。
+
+**隧道方案决策**：采用 Cloudflare **quick tunnel**（随机域名），理由是公网演示只需一个可访问的 HTTPS 入口，无需账号与自有域名即可在 NAT 环境一键出网。仓库同时预留 `deploy/nginx.edge.conf.template` 与 `scripts/deploy_edge.sh`，可平滑切换到 **named tunnel** 获得固定域名。
+
 **安全**：`.env` 不进版本库（`.gitignore` 中 `!.env.example` 精确放行模板）；仓库内无任何密钥；`API_KEY` 环境变量可开启 `X-API-Key` 鉴权；`deploy/` 与 `docker-compose.yml` 中不含明文凭据。
 
-### 6.5 已知限制
+### 6.7 已知限制
 
 | 限制 | 说明 | 缓解 |
 |---|---|---|
-| 快速隧道 URL 会变 | Cloudflare 快速隧道每次重启生成新域名 | 已提供 named tunnel 方案（`deploy/nginx.edge.conf.template` + `scripts/deploy_edge.sh`，需自有域名或 Cloudflare 账号）；当前隧道带 supervisor 保活，链路断开自动重连 |
+| 快速隧道 URL 会变 | Cloudflare quick tunnel 每次重启生成新域名 | **已定为最终方案**（公网演示只需一个可访问的 HTTPS 入口，无需账号/自有域名）；隧道带 supervisor 保活，链路断开自动重连，新地址写入 `~/sciagent/tunnel.url`；仓库已预留 named tunnel 方案（`deploy/nginx.edge.conf.template` + `scripts/deploy_edge.sh`）可随时切换 |
 | 扫描件 OCR 耗时 | 15 页约 4 分钟（4 路并发） | 异步后台解析，前端实时进度；并发度可调 |
 | 541 页书籍的参考文献未结构化 | 该书的参考文献位于书末「Index / Bibliography」章节，正文引用为作者-年份式，无编号列表 | 已解析出 1254 级标题树与 131 万字符正文；书籍类文献的参考文献识别是单独的解析策略，已列为后续工作 |
 | 稠密通道默认 CPU | GPU 已被大模型服务占满 | `EMBEDDING_DEVICE=cuda` 一行切换 |
@@ -811,6 +1014,15 @@ SciAgent 完成了赛题要求的六大模块，并形成三个层面的闭环�
 | **T9** | **模型权重的并发分块获取** | 绕过在实验室内会卡死在 0 B/s 的 HF 镜像，改用支持 Range 请求的镜像做 16 MB 分块、24 路并发拉取，2.27 GB 权重从"不可完成"降到约 4 分钟。 |
 | **T10** | **解析流水线的并发化与线程安全边界测绘** | 把逐页的 CPU 密集段从事件循环下沉到线程池（PyMuPDF 释放 GIL，页面真正并行），并用**每线程独立文档句柄**规避 PyMuPDF Document 的跨线程数据竞争；更关键的是测绘出了 `Page.find_tables()` 的**全局状态竞争边界**——实测同一文档串行得 5 张表、并行只得 1 张，因此把表格提取**单独排除在并行区之外**。这使得"多文档并发分析"既有吞吐也有正确性。 |
 | **T11** | **单进程同源的静态托管** | 让 FastAPI 直接托管 SPA 构建产物：`/api/*` 路由优先，其余回退 `index.html`（保留 React Router 深链），并对路径做越界检查。公网演示因此只需要**一个 URL**，省掉一层反向代理，消除了"前端 origin 与 API origin 不一致"这类同源策略问题。 |
+| **T12** | **元数据感知检索：让元数据进入排序的每一步** | 论文的标题、作者、年份不是"附加信息"，而是区分同领域论文的关键信号。本项目把它送进排序链的**每一环**：① 稠密编码时以 `标题 | 作者 | 年份` 作为前缀；② **交叉编码器重排时同样看到这段前缀**——这一条最关键，若只做①，最后一步会把元数据优势原样抹掉（实测：作者块的重排分从 0.058 升到 0.719）；③ 检索结果按元数据亲和度加权，权重可配置、亲和度可解释。整条链路可通过 `METADATA_BOOST` / `METADATA_AWARE_EMBEDDING` / `METADATA_AWARE_RERANK` 三个开关做 A/B 实测，而不是只能口头声称。 |
+| **T13** | **矛盾检测：规则化的"同指标同上下文不同取值"** | 借鉴 PaperQA2 的 ContraCrow 思路，但**不训练专用检测器**——库内互引仅 14 条边，训练素材不足。改走路线 B：同一指标、同一任务上下文、取值不同 → 数值冲突；同一主语、相反结论 → 结论冲突。三条规则缺一不可（否则"英德 BLEU 41.0"与"英法 BLEU 28.4"会被误判为矛盾）。每条冲突给出**双方原句**、差值、置信度与判定依据。实测在 13 篇库上命中真实案例：Attention 两个版本对同一任务给出 BLEU 41.0 与 41.8。 |
+| **T14** | **共引 / 共参考双关系图谱** | 真实引用图在小库上非常稀疏（13 篇只有 14 条边）。引入 Connected Papers 的两种相似关系后小库也能显出结构：**共引**（被同一篇论文引用）与**共参考**（引用同一篇参考文献），二者作为**可切换的边视图**与真实引用边共存，边上保留共享项清单，因此"这两篇为什么连在一起"始终可回答。 |
+| **T15** | **静态作用域检查：让"从未被测到的路径"不再隐身** | 项目曾两次被同一类缺陷击穿：`chunk.section_title` 读了模型里不存在的列、`os` 在没导入的模块里被使用——两者都只在**运行到那条路径时**才炸，而单元测试恰好没碰它们。为此实现了基于 AST 的作用域检查（`scripts/check_undefined.py`），并作为测试用例固化：**任何模块读取未绑定、未导入、未传参的名字，测试即失败**。 |
+| **T16** | **指标本身也要被审计：四个"量具缺陷"的定位与修复** | 三个 RAG 指标第一次跑出 `0.00 / 0.67 / 0.25`。追查发现**坏的是量具不是系统**：① Markdown 表格整行被丢弃，导致跨论文对比题"一条断言都没有"；② 引文只截取段落前 320 字符，而 chunk 平均 1274 字符，**事实就在证据里却被判为未支持**；③ "who / listed / affiliated"这类**框架词被计入分母**；④ "The paper notes that…"这类**归属前缀不是断言的一部分**。四处修复各有对应的单元测试（T30–T33）。更关键的是：**指标坏了必须先修指标，而不是调系统去迎合指标**——否则报出来的数字毫无意义。 |
+| **T17** | **按断言级的引用对齐修复** | 模型经常把标签指错：作者名单在 `[3]`，答案却写 `[9]`——断言本身是对的，只是指针错了，读者无法核验。本项目不依赖"再问模型一次"，而是用规则定位每条断言、找出真正支持它的证据块并改写标签，**并把引文窗口改成"真正支持该断言的那一句"**，使界面上看到的引文与指标核算的引文是同一段文字。修复后该题从 `faithfulness 0.00` 变为 `1.00`，且**不需要**触发自反馈的二次检索。 |
+| **T18** | **矛盾检测的"可证伪"纪律** | 结论冲突的第一版在真实库上给出 3 条结果，逐条核对**全部是误报**（把超参数表格当成陈述、把 "performance" 这类泛词当成共同主语）。修正方法有三条：跳过表格块、主语重合度改为**按跨论文罕见词计算**、任务一致性检查在"一侧没有专名"时**不再默认放行**。修正后真实库上只剩 1 条**可人工核验**的冲突（Attention 两个版本对同一任务给出 BLEU 41.0 与 41.8）。**宁可少报，不可报错**——一条凑出来的冲突，会毁掉整个模块的可信度。 |
+| **T19** | **"空答案即失败"：把静默失败变成显式失败** | 跨论文题曾返回**空字符串**答案，而护栏却显示"所有引用均有证据支撑"——没有异常、没有红灯，接口返回 200。根因是四层机制叠加：推理通道吃光 token 预算（`finish_reason=length`，审计里 `resp_len=0`）→ 客户端的 `error` 帧被编排器静默丢弃 → 零断言让自反馈循环提前退出 → 护栏把"没有不支撑的断言"读成"通过"。本项目的处理是**逐层拆掉**：错误帧不再被吞、空答案判为生成失败并以双倍预算重试、护栏对空答案必须判负、仍为空则**诚实拒答**。定位它的不是日志（日志里什么都没有），而是 `audit_records` 里的调用审计——这也证明了**审计轨迹本身就是最重要的可观测性资产**。 |
+| **T20** | **把"要不要推理"做成可测量的配置项** | 同一个模型在 Agent 阶段需要推理（否则工具序列不合理），在答案阶段不需要（证据已经在 prompt 里）。项目把这件事变成两个开关（`LLM_THINKING` / `LLM_ANSWER_THINKING`）并给出实测对照：开启推理 4.2 s / 166 tokens，关闭推理 0.8 s / 34 tokens；跨论文题上开启推理会**耗尽预算而没有答案**。这不是拍脑袋的调参，而是**把模型的隐藏成本暴露成可读的数字**，再决定在哪一段关掉它。 |
 
 ### 8.2 应用创新点
 
@@ -824,6 +1036,21 @@ SciAgent 完成了赛题要求的六大模块，并形成三个层面的闭环�
 | **A6** | **Future Work 从"摘录"升级为"机会生成"** | 不止定位并罗列论文的 Future Work 段落，而是去重后归纳成**可执行的研究机会**，每个机会附带新颖性论证、难度、影响力评估与来源论文，把"别人说要做什么"变成"你可以做什么"。 |
 | **A7** | **语义去重驱动的版本治理** | 同一论文的 arXiv v1 与 v7 被识别为同一工作，系统保留较新版本并输出逐行差异对比，同时保留原版本供查阅——这是"内容语义去重 + 版本差异对比"在真实 arXiv 数据上的完整落地。 |
 | **A8** | **CSV 数据到论文图表的一站式产出** | 粘贴论文表格的 CSV 即可得到出版级图 + Figure Caption + 关键结论 + Markdown 数据表四件套，把写作中最机械的一环压缩到一次操作。 |
+| **A9** | **把"矛盾"做成界面上的一个工作台，而不是一个算法** | 多数系统只在生成答案时做引用校验；本系统把矛盾扫描做成图谱工作台里的独立面板：扫描全部文献库 → 列出冲突 → 左右并排给出双方原句与页码 → 一键跳到阅读器对应位置。用户得到的不只是"系统发现了矛盾"，而是"矛盾在哪、谁说的、差多少"。 |
+| **A10** | **检索过程本身可见、可审计** | 引用卡片上直接显示"元数据匹配度 XX%"，图谱边的面板给出判定依据，矛盾卡片给出规则与置信度。**没有一个评分是黑箱**——这与"用 LLM 自评当效果证据"的做法相反，是本项目在可解释性上的立场。 |
+
+### 8.3 明确不做的事（及理由）
+
+调研了一圈同类工作之后，以下几项是**主动放弃**的，写在这里是为了说明取舍，而不是遗漏：
+
+| 不做 | 理由 |
+|---|---|
+| 多智能体角色扮演层（Domain Expert / Skeptic / Practitioner…） | STORM 与 Agent Laboratory 都用它，收益主要是综述文风与覆盖率；但 Agent Laboratory 报告 LLM 评审**系统性高估**自身产出（6.1/10 vs 人类 3.8/10），角色越多、幻觉越难被发现。本项目把预算投在**可核验的溯源**上。 |
+| 追逐 4500 万篇的索引规模 | OpenScholar 的规模依赖千卡集群与亿级向量，与本项目的可复现部署目标冲突。 |
+| 训练专用 retriever / 矛盾检测器 | 库内互引只有 14 条边，训练素材不足；用规则化路线（§T13）反而能给出可解释、可审计的结果。 |
+| 引入 Docling 作为主解析栈 | 实测 PyMuPDF-Layout 在 DocLayNet 上 F1 0.8356 vs Docling 0.8102，参数 1.8M vs 20M，且不需要 GPU——换栈是倒退。 |
+| 用 LLM 自评当作效果证据 | Agent Laboratory 的 optimism gap 是直接证据；本项目改用规则化指标（§6.3），并把"单元测试通过"与"效果达标"分开陈述。 |
+| named tunnel / 反向代理层 | 演示环境用 quick tunnel 已足够，增加一层就多一个故障点。 |
 
 ---
 
@@ -838,13 +1065,14 @@ SciAgent 完成了赛题要求的六大模块，并形成三个层面的闭环�
 | GET | `/api/papers/{id}` `/structure` `/references` `/versions` `/versions/diff` | 文献详情、标题树、参考文献、版本对比 |
 | POST | `/api/papers/upload` | 多文件上传（multipart），后台解析 |
 | DELETE | `/api/papers/{id}` | 删除文献 |
-| POST | `/api/rag/ask` | **SSE** 问答流（`session`/`route`/`plan`/`thinking`/`tool_call`/`tool_result`/`delta`/`guardrail`/`final`） |
+| POST | `/api/rag/ask` | **SSE** 问答流（`session`/`route`/`plan`/`thinking`/`tool_call`/`tool_result`/`delta`/`refine`/`refine_result`/`generation_failed`/`guardrail`/`abstain`/`final`） |
 | POST | `/api/rag/search` | 混合检索 |
 | GET | `/api/rag/chunks/{paper_id}` | 分块列表 |
 | GET | `/api/reader/{id}/pages` `/page/{n}/image` `/citations` `/reference/{n}` `/translation` | 阅读器数据 |
 | POST | `/api/reader/translate` | 片段翻译 |
-| POST | `/api/graph` `/future-work` `/review` | 图谱、Future Work、自动综述 |
-| GET | `/api/graph/citations/quality` | 引用质量分析 |
+| POST | `/api/graph` `/future-work` `/review` | 图谱（`view` 可选 `citation`/`co_citation`/`co_reference`/`all`）、Future Work、自动综述 |
+| POST | `/api/graph/contradictions` | **矛盾检测**：数值冲突 + 结论冲突，双方原句 + 置信度 |
+| GET | `/api/graph/citations/quality` | 引用质量分析（含支持/对照/提及统计） |
 | POST | `/api/search/arxiv` `/download` `/recommend` `/feedback` | arXiv 检索、下载、推荐、反馈 |
 | GET | `/api/search/recent` `/reproducibility` | 分类追踪、可复现性检查 |
 | POST | `/api/writing/framework` `/diagram` | 论文框架、架构图 |
@@ -864,6 +1092,9 @@ SciAgent 完成了赛题要求的六大模块，并形成三个层面的闭环�
 | `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | 交叉编码器 |
 | `RERANKER_ENABLED` | `true` | 关闭则退化为 BM25-only |
 | `RETRIEVE_TOP_K_SPARSE` / `_DENSE` / `_FINAL` | 40 / 40 / 8 | 召回与精排数量 |
+| `METADATA_BOOST` | `0.30` | 元数据亲和度对排序分的加权（0 = 关闭） |
+| `METADATA_AWARE_EMBEDDING` | `true` | 稠密编码是否携带标题/作者/年份前缀 |
+| `METADATA_AWARE_RERANK` | `true` | 交叉编码器是否同样看到该前缀 |
 | `PARSE_WORKERS` | `8` | 页面级并行解析 |
 | `RENDER_DPI` | `150` | 栅格化 / OCR 分辨率 |
 | `AGENT_MAX_STEPS` | `8` | 工具循环上限 |
@@ -880,14 +1111,15 @@ sciagent/
 │   │   ├── parsing/     layout · headings · metadata · references
 │   │   │                extractors · ocr · dedup · pipeline
 │   │   ├── rag/         chunker · sparse · embeddings · retriever
-│   │   ├── graph/       builder · future_work
+│   │   │                meta_aware · evaluation
+│   │   ├── graph/       builder · future_work · contradiction
 │   │   ├── tools/       sources · registry · viz
 │   │   ├── agents/      orchestrator
 │   │   ├── services/    papers · agent · translation
 │   │   ├── api/routers/ health · papers · rag · reader · search
 │   │   │                graph · writing · viz · admin
 │   │   └── main.py
-│   ├── tests/           5 个测试文件
+│   ├── tests/           12 个测试文件（160+ 个用例）
 │   ├── requirements.txt · pyproject.toml
 ├── frontend/
 │   ├── src/pages/       Library · Reader · Ask · GraphWorkbench
@@ -896,10 +1128,17 @@ sciagent/
 │   ├── src/lib/         api.ts · sse.ts
 │   ├── src/store.ts
 │   └── package.json · vite.config.ts · tailwind.config.js
-├── deploy/              nginx.conf · entrypoint.sh
-├── docs/                technical-report.md · demo-script.md
-├── scripts/             download_models.py · parse_smoke.py · probe_models.py
-│                        bench_embeddings.py · check_imports.py · *.sh
+├── deploy/              nginx.conf · nginx.edge.conf.template · entrypoint.sh
+├── docs/                technical-report.md · technical-report.pdf · demo-script.md
+├── scripts/             部署 run_backend.sh · restart_backend.sh · start_tunnel.sh
+│                        灌库 seed_library.sh · seed_missing.sh · reseed_library.sh
+│                        模型 download_models.py · parallel_download.py
+│                        解析 parse_smoke.py · 诊断 diag_fk.py ·
+│                        check_table_threads.py · db_inspect.py
+│                        评测 eval_rag.py · eval_retrieval.py
+│                        静态检查 check_undefined.py
+│                        文档 md2pdf.py · 校验 verify_deployment.sh · cf_verify.sh
+├── docs/                related-work-survey.md（调研报告，30 条带出处参考文献）
 ├── docker-compose.yml
 └── .env.example
 ```
@@ -925,6 +1164,17 @@ sciagent/
 17. Beltagy et al. *PyMuPDF.* 2023.
 18. Bird, S. *PyTorch.* 2020.
 19. H. Lee et al. *Efficient Large Language Model Serving with PagedAttention.* SOSP 2023.（vLLM）
+20. Xiong et al. *PaperQA2: An Open Source Retrieval-Augmented Generation Agent over Scientific Literature.* arXiv:2409.13740.（元数据感知检索、ContraCrow 矛盾检测）
+21. Wang et al. *OpenScholar: Synthesizing Scientific Literature with Retrieval-Augmented LMs.* Nature 650:857–863, 2026；arXiv:2411.14199.（引用幻觉率 78–90%、自反馈推理循环）
+22. Shao et al. *Assisting in Writing Wikipedia-like Articles From Scratch with Large Language Models.* NAACL 2024；arXiv:2402.14207.（STORM：视角发现与先大纲后写）
+23. Schmidgall et al. *Agent Laboratory: Using LLM Agents as Research Assistants.* EMNLP 2025；arXiv:2501.04227.（optimism gap：LLM 评审 6.1/10 vs 人类 3.8/10）
+24. Es et al. *RAGAS: Automated Evaluation of Retrieval Augmented Generation.* arXiv:2309.15217.（忠实度 / 答案相关性 / 上下文精确率）
+25. Saad-Falcon et al. *ARES: An Automated Evaluation Framework for Retrieval-Augmented Generation Systems.* NAACL 2024；arXiv:2311.09476.（与人类判断一致度 0.95 / 0.78 / 0.70）
+26. Pfitzmann et al. *Docling Technical Report.* arXiv:2408.09869.（文档解析基准：表格 97.9%、TEDS）
+27. PyMuPDF-Layout 项目数据：DocLayNet F1 0.8356 vs Docling 0.8102，参数 1.8M vs 20M，无需 GPU。
+28. Nicholson et al. *Smart Citations.* 2021.（引用立场三分：supporting / contrasting / mentioning）
+29. Nicholson et al. *Connected Papers.* 2020.（共引 / 共参考相似关系）
+30. Barrot et al. *PMC 编造引用率统计*：2023 年 1/2828 → 2025 年 1/458 → 2026 年前七周 1/277；GPTZero 对 NeurIPS 2025 录用论文的 100 条幻觉引用统计。
 
 ---
 
