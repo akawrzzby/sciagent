@@ -65,6 +65,45 @@ def test_two_values_of_the_same_metric_in_different_contexts_do_not_conflict() -
     assert contradiction.detect_numeric_conflicts(chunks) == []
 
 
+def test_a_shared_metric_name_alone_is_not_a_shared_context() -> None:
+    """"humans achieve 95.6% accuracy" (GPT-3, few-shot tasks) and "the final
+    model achieves 97%-98% accuracy on NSP" (BERT) measure different things.
+
+    The only word the two statements share is the metric name itself.  If the
+    metric is allowed to count as evidence that both sides talk about the same
+    measurement, every pair of statements about the same metric looks like a
+    contradiction -- which is exactly the false positive this test pins down.
+    """
+    chunks = [
+        _chunk("p1", "Language Models are Few-Shot Learners",
+               "The examples were adversarially mined to be difficult for "
+               "language models while remaining easy for humans (who achieve "
+               "95.6% accuracy)."),
+        _chunk("p2", "BERT",
+               "The final model achieves 97%-98% accuracy on NSP."),
+    ]
+    assert contradiction.detect_numeric_conflicts(chunks) == []
+
+
+def test_a_real_conflict_is_still_detected_after_the_metric_exclusion() -> None:
+    """The exclusion must not swallow genuine conflicts: the two Attention
+    versions report the same measurement of the same metric differently."""
+    chunks = [
+        _chunk("p1", "Attention v1",
+               "On the WMT 2014 English-to-French translation task, our model "
+               "establishes a new single-model state-of-the-art BLEU score of "
+               "41.0 after training for 3.5 days on eight GPUs."),
+        _chunk("p2", "Attention v7",
+               "On the WMT 2014 English-to-French translation task, our model "
+               "establishes a new single-model state-of-the-art BLEU score of "
+               "41.8 after training for 3.5 days on eight GPUs."),
+    ]
+    conflicts = contradiction.detect_numeric_conflicts(chunks)
+    assert len(conflicts) == 1
+    assert conflicts[0].metric == "BLEU"
+    assert conflicts[0].delta == 0.8
+
+
 def test_the_same_number_twice_is_not_a_contradiction() -> None:
     chunks = [
         _chunk("p1", "Paper A", "The model reaches a BLEU score of 41.0 on WMT."),

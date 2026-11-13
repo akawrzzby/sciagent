@@ -355,8 +355,18 @@ def detect_numeric_conflicts(
                     continue
                 if not _same_task(left.context, right.context):
                     continue
-                overlap = _context_overlap(_context_words(left.context),
-                                          _context_words(right.context))
+                # The metric the two sides share must not be counted as
+                # evidence that they talk about the same thing.  Without this
+                # exclusion, "humans achieve 95.6% accuracy" (GPT-3, few-shot
+                # tasks) and "the final model achieves 97%-98% accuracy on NSP"
+                # (BERT) look like the same measurement, because the only word
+                # they share is the metric itself.  Two statements about the
+                # same metric are only in conflict if they say something more
+                # than "both mention the metric".
+                metric_words = _context_words(metric)
+                left_words = _context_words(left.context) - metric_words
+                right_words = _context_words(right.context) - metric_words
+                overlap = _context_overlap(left_words, right_words)
                 if overlap < min_overlap:
                     continue
                 delta = abs(left.value - right.value)
