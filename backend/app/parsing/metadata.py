@@ -69,6 +69,24 @@ _ORG_WORDS = {
 _BAND_END_TITLES = ("abstract", "introduction", "1 introduction", "keywords",
                     "ccs concepts", "ACM Reference Format")
 
+# Place names that must never be read as a person's name.  The single words
+# are only those that cannot plausibly be a surname; multi word names are
+# listed separately because every part of them is an ordinary word.
+_PLACE_WORDS = {
+    "california", "usa", "china", "canada", "germany", "israel", "france",
+    "japan", "korea", "singapore", "switzerland", "london", "toronto",
+    "beijing", "shanghai", "massachusetts", "seattle", "angeles", "austin",
+    "boston", "maryland", "texas", "india", "italy", "spain", "sweden",
+    "norway", "denmark", "finland", "poland", "australia", "brazil",
+    "cambridge", "oxford", "york", "wales", "scotland", "ireland",
+    "netherlands", "austria", "hungary", "romania", "greece", "portugal",
+}
+_PLACE_PHRASES = {
+    "mountain view", "new york", "san francisco", "los angeles", "palo alto",
+    "menlo park", "sunnyvale", "redmond", "bellevue", "hillsboro",
+    "san diego", "san jose", "new jersey", "new zealand", "hong kong",
+}
+
 
 @dataclass(slots=True)
 class Author:
@@ -115,8 +133,19 @@ class PaperMetadata:
 
 
 # --------------------------------------------------------------------------- helpers
+# Ligatures that LaTeX emits as a single code point.  A name such as
+# "Raﬀel" has to pass the name test, which only accepts letters.
+_LIGATURES = {
+    "\ufb00": "ff", "\ufb01": "fi", "\ufb02": "fl",
+    "\ufb03": "ffi", "\ufb04": "ffl", "\ufb05": "st", "\ufb06": "st",
+    "\u00a0": " ",
+}
+
+
 def _clean(text: str) -> str:
-    return re.sub(r"\s+", " ", text or "").strip()
+    for src, dst in _LIGATURES.items():
+        text = (text or "").replace(src, dst)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _is_arxiv_stamp(text: str) -> bool:
@@ -135,52 +164,251 @@ def _strip_markers(text: str) -> tuple[str, str]:
     return _clean(text), marker
 
 
+# A trailing affiliation index, e.g. the "1" in "Jason Wei 1".  The TMLR and
+# NeurIPS templates print the institution index as a small superscript right
+# after the author name.
+_TRAILING_INDEX = re.compile(r"^(.*?)[\s]?(\d{1,2})$")
+
+
+def _split_affiliation_index(text: str) -> tuple[str, str]:
+    """Split a trailing affiliation index off a name.
+
+    Returns ``(name, index)``.  The index is only accepted when the text that
+    remains still looks like a personal name, so that names such as "GPT 3"
+    are left alone.
+    """
+    text = _clean(text)
+    m = _TRAILING_INDEX.match(text)
+    if not m:
+        return text, ""
+    candidate, index = m.group(1).strip(), m.group(2)
+    if candidate and _looks_like_person_name(candidate):
+        return candidate, index
+    return text, ""
+
+
+def _affiliation_index(marker: str) -> int | None:
+    """The affiliation index encoded in an author marker, if any."""
+    m = re.search(r"\d{1,2}", marker or "")
+    return int(m.group(0)) if m else None
+
+
 def _looks_like_person_name(text: str) -> bool:
-    """A personal name looks like ``Firstname Lastname`` (2-4 tokens)."""
+    """A personal name looks like ``Firstname Lastname`` (2-4 core tokens).
+
+    Name particles ("de", "van", "von" ...) do not count towards the limit, so
+    that a name such as "Henrique Ponde de Oliveira Pinto" is still accepted
+    as one person rather than being split or dropped.
+    """
     text = _clean(text)
     if not text or len(text) > 60:
         return False
     if _EMAIL.search(text) or "@" in text:
         return False
+    if text.lower() in _PLACE_PHRASES:
+        return False
     tokens = text.split()
-    if not (2 <= len(tokens) <= 4):
+    if not (2 <= len(tokens) <= 6):
+        return False
+    core = [t for t in tokens if t.strip(".,").lower() not in _NAME_PARTICLES]
+    if not (2 <= len(core) <= 4):
         return False
     for tok in tokens:
-        core = tok.strip(".,")
-        if not core:
+        core_tok = tok.strip(".,")
+        if not core_tok:
             return False
-        # An organisation is never a person.
-        if core.lower() in _ORG_WORDS:
+        # An organisation or a place is never a person.
+        if core_tok.lower() in _ORG_WORDS or core_tok.lower() in _PLACE_WORDS:
             return False
         # Initials ("A.", "N.") or capitalised words.
-        if not (core[0].isupper() or core.lower() in _NAME_PARTICLES):
+        if not (core_tok[0].isupper() or core_tok.lower() in _NAME_PARTICLES):
             return False
-        if not re.fullmatch(r"[A-Za-z\u00c0-\u024f.'\-\u0140-\u017f\u2217]+", core):
+        if not re.fullmatch(r"[A-Za-z\u00c0-\u024f.'\-\u0140-\u017f\u2217]+", core_tok):
             return False
     return True
 
 
 def _split_author_list(raw: str) -> list[tuple[str, str]]:
-    """Split a comma separated author list into ``(name, marker)`` pairs."""
+    """Split an author list into ``(name, marker)`` pairs.
+
+    Three layouts occur in practice:
+
+    * ``Ashish Vaswani, Noam Shazeer, ...`` - comma separated.
+    * ``Mark Chen * 1 Jerry Tworek * 1 Heewoo Jun * 1`` - a dense author band
+      where the names are separated by whitespace and affiliation indices
+      instead of by commas (used by the large-author papers, e.g. the 40+
+      author Codex paper).  Splitting such a block on commas alone yields one
+      very long token sequence that no longer looks like a person name, and
+      the author list silently comes out empty.
+    * ``Mark Chen * Jerry Tworek * ...`` - a dense band without indices.
+    """
     raw = _clean(raw)
     if not raw:
         return []
     raw = re.sub(r",?\s+and\s+", ", ", raw, flags=re.IGNORECASE)
-    out: list[tuple[str, str]] = []
+
+    # --- dense band: the affiliation index is the anchor -------------------
+    # Every author is followed by its affiliation index, so the text between
+    # two indices is exactly one author (plus an optional footnote marker).
+    dense = _split_dense_author_band(raw)
+    if len(dense) > 1 and all(_looks_like_person_name(n) for n, _ in dense):
+        return dense
+
+    # --- dense band without indices: cut at the footnote markers ----------
+    marker_re = re.compile(rf"[{re.escape(_MARKER_CHARS)}]+")
+    if marker_re.search(raw):
+        out: list[tuple[str, str]] = []
+        for piece in marker_re.split(raw):
+            piece = piece.strip()
+            if not piece:
+                continue
+            # The affiliation index sits *between* the marker and the next
+            # name ("Chen * 1 Tworek"), so it has to be stripped as well.
+            piece = re.sub(r"^\d{1,2}\s+", "", piece)
+            name, marker = _strip_author_segment(piece)
+            if name:
+                out.append((name, marker))
+        if len(out) > 1 and all(_looks_like_person_name(n) for n, _ in out):
+            return out
+
+    # --- comma separated ---------------------------------------------------
+    out = []
     for part in (p.strip() for p in raw.split(",")):
         if not part or part.lower() in {"and", "&"}:
             continue
         name, marker = _strip_markers(part)
+        name, index = _split_affiliation_index(name)
+        if index:
+            marker = f"{marker}{index}"
+        name = _clean(name)
         if name:
             out.append((name, marker))
     return out
+
+
+# An affiliation index is a small standalone integer, e.g. the "1" in
+# "Mark Chen 1".  It is surrounded by whitespace on both sides.
+_AFFIL_INDEX_TOKEN = re.compile(r"(?<!\S)(\d{1,2})(?!\S)")
+
+
+def _strip_author_segment(text: str) -> tuple[str, str]:
+    """Strip the footnote marker and affiliation index that trail a name."""
+    text = text.strip()
+    marker = ""
+    m = re.search(rf"([{re.escape(_MARKER_CHARS)}]+)\s*$", text)
+    if m:
+        marker = m.group(1)
+        text = text[: m.start()]
+    text, index = _split_affiliation_index(text)
+    if index:
+        marker = f"{marker}{index}"
+    return _clean(text), marker
+
+
+def _split_dense_author_band(raw: str) -> list[tuple[str, str]]:
+    """Split an author band that uses affiliation indices as separators.
+
+    Large-author papers print their author list as one dense block per line::
+
+        Mark Chen * 1 Jerry Tworek * 1 Heewoo Jun * 1
+
+    The affiliation index is the reliable anchor: every author is followed by
+    one, so the text between two indices is exactly one author plus an
+    optional footnote marker.  The index is kept in the marker so that the
+    author can be linked back to the institution it belongs to.
+    """
+    out: list[tuple[str, str]] = []
+    pos = 0
+    for m in _AFFIL_INDEX_TOKEN.finditer(raw):
+        name, marker = _strip_author_segment(raw[pos:m.start()])
+        index = m.group(1)
+        if name:
+            out.append((name, f"{marker}{index}"))
+        pos = m.end()
+    name, marker = _strip_author_segment(raw[pos:])
+    if name:
+        out.append((name, marker))
+    return out
+
+
+# An affiliation line that carries its own index, e.g. "1Google Research".
+# The index is printed *without* a space, which is what tells it apart from a
+# numbered section heading such as "12 Introduction".
+_AFFIL_INDEX_PREFIX = re.compile(r"^\s*(\d{1,2})[A-Z]")
 
 
 def _is_affiliation_line(text: str) -> bool:
     lower = text.lower()
     if len(text) > 300:
         return False
-    return any(marker in lower for marker in _AFFILIATION_MARKERS)
+    if any(marker in lower for marker in _AFFILIATION_MARKERS):
+        return True
+    # "3UNC Chapel Hill" -- an indexed affiliation whose name carries none of
+    # the usual institutional words.
+    return len(text) < 80 and bool(_AFFIL_INDEX_PREFIX.match(text.strip()))
+
+
+# --------------------------------------------------------------------------- year
+def _year_from_arxiv_id(arxiv_id: str) -> int | None:
+    """Derive the submission year from an arXiv identifier.
+
+    Modern arXiv identifiers encode the submission month as ``YYMM``: the first
+    two digits are the last two digits of the year, the next two are the
+    month.  This has to be preferred over scanning the page for a four digit
+    number, because a naive scan happily matches the identifier itself
+    ("1910.02054" -> 1910) and reports a year that never existed.
+    """
+    m = re.match(r"^(\d{2})\d{2}\.\d{4,5}", (arxiv_id or "").strip())
+    if not m:
+        return None
+    yy = int(m.group(1))
+    return 1900 + yy if yy >= 90 else 2000 + yy
+
+
+# --------------------------------------------------------------------------- abstract
+# Signals that the front matter has moved past the abstract.  An extracted
+# abstract routinely carries the equal-contribution footnote, the per-author
+# contribution list, the conference footer, the keyword list or the first
+# section heading, because none of those is a heading of its own.
+_ABSTRACT_STOP_PATTERNS = (
+    r"[\*∗✻✦]\s*equal contribution",
+    r"[\*∗✻✦†‡]\s*(?:work performed|second author|corresponding author)",
+    r"author contributions",
+    r"contributions for all the authors",
+    r"listing order is random",
+    r"correspondence to",
+    r"\d{1,2}(?:st|nd|rd|th)\s+conference",
+    r"\bkeywords?\s*:",
+    r"\bindex terms\b",
+    r"\b\d{1,2}\.?\s+introduction\b",
+    r"\bpreprint\.\s*under review\b",
+    r"\barxiv:\d{4}\.\d{4,5}",
+)
+
+
+def _trim_abstract(text: str) -> str:
+    """Cut the front-matter tail that follows the abstract.
+
+    Everything that sits *below* the abstract on the first page -- the
+    equal-contribution footnote, the per-author contribution list, the
+    conference footer, the keyword list, the first section heading -- ends up
+    inside the extracted abstract unless it is removed explicitly.  Quoting
+    that tail as if it were part of the abstract is worse than having no
+    abstract at all.
+    """
+    text = text or ""
+    kept: list[str] = []
+    for line in text.splitlines():
+        cut = len(line)
+        for pattern in _ABSTRACT_STOP_PATTERNS:
+            m = re.search(pattern, line, re.IGNORECASE)
+            if m is not None and m.start() < cut:
+                cut = m.start()
+        if cut < len(line):
+            kept.append(line[:cut])
+            break
+        kept.append(line)
+    return _clean(" ".join(kept))
 
 
 # --------------------------------------------------------------------------- title
@@ -281,8 +509,8 @@ def extract_metadata(
         lines = [ln.strip() for ln in block.text.splitlines() if ln.strip()]
         if not lines:
             continue
-        head, marker = _strip_markers(lines[0])
-        rest = lines[1:]
+        head, _head_marker = _strip_markers(lines[0])
+        head, _head_index = _split_affiliation_index(head)
 
         email = ""
         for ln in lines:
@@ -291,11 +519,34 @@ def extract_metadata(
                 email = m.group(0)
                 break
 
-        # --- case A: a block that is one author (name + affiliation + mail)
+        # --- case A: the block holds one or more authors, one per line -----
         if _looks_like_person_name(head):
-            authors.append(Author(name=head, email=email, marker=marker))
-            for ln in rest:
-                if _EMAIL.search(ln):
+            # The TMLR and NeurIPS templates print the author, a superscript
+            # affiliation index and the e-mail address next to each other, so
+            # one PDF block can hold the whole author list.  The block is
+            # therefore read line by line, and the e-mail that follows an
+            # author belongs to that author.
+            first = len(authors)
+            for ln in lines:
+                ln_head, ln_marker = _strip_markers(ln)
+                ln_head, ln_index = _split_affiliation_index(ln_head)
+                found = _EMAIL.search(ln)
+                if found:
+                    ln_head = _clean(ln_head.replace(found.group(0), " "))
+                if _looks_like_person_name(ln_head):
+                    authors.append(Author(
+                        name=ln_head,
+                        email=found.group(0) if found else "",
+                        marker=ln_marker,
+                        affiliation_indices=[int(ln_index)] if ln_index else [],
+                    ))
+                    continue
+                if found:
+                    # A bare e-mail line belongs to the author printed above it.
+                    if len(authors) > first:
+                        authors[-1].email = authors[-1].email or found.group(0)
+                    elif not email:
+                        email = found.group(0)
                     continue
                 if _is_affiliation_line(ln) and ln not in affiliations:
                     affiliations.append(ln)
@@ -306,7 +557,11 @@ def extract_metadata(
         names = [(n, mk) for n, mk in pairs if _looks_like_person_name(n)]
         if names:
             for n, mk in names:
-                authors.append(Author(name=n, email=email, marker=mk))
+                index = _affiliation_index(mk)
+                authors.append(Author(
+                    name=n, email=email, marker=mk,
+                    affiliation_indices=[index] if index else [],
+                ))
             continue
 
         # --- case C: an affiliation-only block
@@ -328,8 +583,19 @@ def extract_metadata(
     meta.authors = unique_authors[:40]
     meta.affiliations = affiliations[:20]
 
+    # Link every author to the institution it was indexed with.  An index is
+    # only kept when an affiliation line actually carries it, so that a stray
+    # number in a name cannot invent an affiliation.
+    known = set()
+    for aff in meta.affiliations:
+        m = _AFFIL_INDEX_PREFIX.match(aff.strip())
+        if m:
+            known.add(int(m.group(1)))
+    for a in meta.authors:
+        a.affiliation_indices = [i for i in a.affiliation_indices if i in known]
+
     # ------------------------------------------------------------- abstract
-    meta.abstract = _extract_abstract(first_page, raw_text)
+    meta.abstract = _extract_abstract(first_page, raw_text, body_size)
 
     # ------------------------------------------------------------- keywords
     km = _KEYWORDS.search(raw_text)
@@ -356,33 +622,66 @@ def extract_metadata(
     if d:
         meta.doi = d.group(1).rstrip(".")
 
-    ym = re.search(r"\b(19|20)\d{2}\b", head_text)
-    if ym:
-        meta.year = int(ym.group(0))
-
-    # The arXiv stamp carries the submission date: "arXiv:1706.03762v1 [cs.CL] 12 Jun 2017".
-    for b in first_page:
-        if _is_arxiv_stamp(b.text):
-            dm = re.search(r"\b(19|20)\d{2}\b", b.text)
-            if dm:
-                meta.year = int(dm.group(0))
-            break
+    # -------------------------------------------------------------- year
+    # Priority matters here: a naive scan of the first page for a four digit
+    # number matches the arXiv identifier itself ("1910.02054" -> 1910) and
+    # reports a year that never existed.
+    meta.year = _year_from_arxiv_id(meta.arxiv_id)
+    if meta.year is None:
+        # The arXiv stamp carries the submission date: "arXiv:1706.03762v1 [cs.CL] 12 Jun 2017".
+        for b in first_page:
+            if _is_arxiv_stamp(b.text):
+                dm = re.search(r"\b(19|20)\d{2}\b", b.text)
+                if dm:
+                    meta.year = int(dm.group(0))
+                break
+    if meta.year is None:
+        # Last resort: scan the page, but ignore the identifier and the DOI.
+        scrubbed = _DOI.sub(" ", _ARXIV_ID.sub(" ", head_text))
+        ym = re.search(r"\b(19|20)\d{2}\b", scrubbed)
+        if ym:
+            meta.year = int(ym.group(0))
 
     return meta
 
 
-def _extract_abstract(first_page: list[Block], raw_text: str) -> str:
-    """Extract the abstract paragraph."""
+def _extract_abstract(first_page: list[Block], raw_text: str,
+                      body_size: float = 0.0) -> str:
+    """Extract the abstract paragraph.
+
+    On a two-column page the ``Abstract`` heading and the column next to it
+    share the same vertical position, so the abstract body cannot be found by
+    simply taking "the next few blocks" -- that picks up the *other* column's
+    section heading and the abstract comes out empty.  The body blocks are
+    therefore collected from the heading's own column, up to the next
+    heading-sized block.
+    """
     for b in first_page:
         text = b.text.strip()
         m = _ABSTRACT.match(text)
-        if m:
-            rest = m.group(1).strip()
-            if rest:
-                return _clean(rest)
-            idx = first_page.index(b)
-            parts = [x.text.strip() for x in first_page[idx + 1 : idx + 4]]
-            return _clean(" ".join(parts))[:4000]
+        if not m:
+            continue
+        rest = m.group(1).strip()
+        if rest:
+            # The abstract may continue on the following lines of the block.
+            block_lines = text.splitlines()
+            if len(block_lines) > 1:
+                rest = "\n".join([rest, *block_lines[1:]]).strip()
+            return _trim_abstract(rest)[:4000]
+
+        parts: list[str] = []
+        for nxt in first_page:
+            if nxt is b or nxt.column != b.column or nxt.y0 <= b.y1:
+                continue
+            if body_size and nxt.spans:
+                size = max((s.size for s in nxt.spans), default=0)
+                if size > body_size * 1.12:
+                    break  # the next heading of the same column
+            parts.append(nxt.text.strip())
+            if len(parts) >= 3:
+                break
+        if parts:
+            return _trim_abstract(" ".join(parts))[:4000]
 
     m = _ABSTRACT.search(raw_text)
     if m:
@@ -391,7 +690,7 @@ def _extract_abstract(first_page: list[Block], raw_text: str) -> str:
                         tail, re.IGNORECASE)
         if cut:
             tail = tail[: cut.start()]
-        return _clean(tail)[:4000]
+        return _trim_abstract(tail)[:4000]
     return ""
 
 
@@ -528,7 +827,7 @@ def extract_metadata_from_markdown(
                 break
         body = " ".join(l.strip() for l in lines[i + 1: stop] if l.strip())
         body = _LATEX_MARKER.sub(" ", body)
-        meta.abstract = _clean(body)[:4000]
+        meta.abstract = _trim_abstract(body)[:4000]
         break
 
     # ----------------------------------------------------------- identifiers
@@ -551,14 +850,17 @@ def extract_metadata_from_markdown(
     if d:
         meta.doi = d.group(1).rstrip(".")
 
-    ym = re.search(r"\b(19|20)\d{2}\b", head_text)
-    if ym:
-        meta.year = int(ym.group(0))
-
-    # The arXiv stamp carries the submission date.
-    stamp = re.search(r"arXiv:\d{4}\.\d{4,5}v?\d*\s*\[?[^\n]*?((?:19|20)\d{2})", head_text)
-    if stamp:
-        meta.year = int(stamp.group(1))
+    # Priority: the identifier itself, then the stamp, then a scrubbed scan.
+    meta.year = _year_from_arxiv_id(meta.arxiv_id)
+    if meta.year is None:
+        stamp = re.search(r"arXiv:\d{4}\.\d{4,5}v?\d*\s*\[?[^\n]*?((?:19|20)\d{2})", head_text)
+        if stamp:
+            meta.year = int(stamp.group(1))
+    if meta.year is None:
+        scrubbed = _DOI.sub(" ", _ARXIV_ID.sub(" ", head_text))
+        ym = re.search(r"\b(19|20)\d{2}\b", scrubbed)
+        if ym:
+            meta.year = int(ym.group(0))
 
     km = _KEYWORDS.search("\n".join(pages))
     if km:

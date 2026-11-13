@@ -28,6 +28,10 @@ MIN_COLUMN_COVERAGE = 0.25
 # Patterns that identify a page that is mostly one wide table.
 _HORIZONTAL_RULE = re.compile(r"[-_]{3,}")
 
+# Text extraction flags for the structured ("dict") reader.  Ligatures are
+# expanded back to ASCII on purpose -- see ``extract_blocks``.
+_DICT_FLAGS = pymupdf.TEXTFLAGS_DICT & ~pymupdf.TEXT_PRESERVE_LIGATURES
+
 
 @dataclass(slots=True)
 class Span:
@@ -127,7 +131,12 @@ def extract_blocks(page: pymupdf.Page, page_no: int) -> list[Block]:
     which is exactly what we need to rebuild the document structure.
     """
     blocks: list[Block] = []
-    data = page.get_text("dict")
+    # ``TEXTFLAGS_DICT`` keeps ligatures, and a LaTeX PDF that renders "Jeff
+    # Dean" with the ``ff`` ligature then yields "JeﬀDean" -- the space
+    # behind the ligature is swallowed and the name is no longer a name.
+    # Dropping ``TEXT_PRESERVE_LIGATURES`` expands the ligature back to
+    # ASCII and restores the missing space.
+    data = page.get_text("dict", flags=_DICT_FLAGS)
     for b in data.get("blocks", []):
         if b.get("type") != 0:  # 0 == text, 1 == image
             continue

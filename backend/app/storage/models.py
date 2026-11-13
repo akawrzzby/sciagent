@@ -269,6 +269,10 @@ class Chunk(Base):
     char_end: Mapped[int] = mapped_column(Integer, default=0)
     content: Mapped[str] = mapped_column(Text, default="")
     token_count: Mapped[int] = mapped_column(Integer, default=0)
+    # The heading the chunk was cut from, e.g. "3.2 Attention".  The label is
+    # copied from the section tree at parse time so that a citation can be
+    # rendered with the place it came from without a join.
+    section_title: Mapped[str] = mapped_column(String(512), default="")
     # Path of the memmap holding the dense vector for this chunk.
     embedding_ref: Mapped[str] = mapped_column(String(512), default="")
     embedding_row: Mapped[int] = mapped_column(Integer, default=-1)

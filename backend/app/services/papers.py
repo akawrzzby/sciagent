@@ -22,7 +22,7 @@ from app.core.events import get_bus, paper_channel
 from app.core.logging import get_logger
 from app.parsing import dedup as dedup_mod
 from app.parsing import pipeline
-from app.rag import chunker
+from app.rag import chunker, meta_aware
 from app.rag.embeddings import VectorStore, get_embedding_service
 from app.storage.db import session_scope
 from app.storage.models import (
@@ -341,6 +341,7 @@ async def _persist(
                 ordinal=c.ordinal, page_no=c.page_no, char_start=c.char_start,
                 char_end=c.char_end, content=c.content,
                 token_count=c.token_estimate, kind=c.kind,
+                section_title=c.section_title or "",
                 embedding_ref="", embedding_row=-1,
             )
             db.add(row)
@@ -357,7 +358,7 @@ async def _persist(
         ))
 
     # ---- dense index -----------------------------------------------------
-    await _index_chunks(paper_id, chunk_list)
+    await _index_chunks(paper_id, chunk_list, meta=meta)
 
 
 def _is_two_column(parsed: pipeline.ParsedDocument) -> bool:
@@ -382,18 +383,30 @@ def _is_two_column(parsed: pipeline.ParsedDocument) -> bool:
     return votes >= 2
 
 
-async def _index_chunks(paper_id: str, chunk_list: list[chunker.Chunk]) -> None:
-    """Embed the chunks of a paper and write the vector matrix."""
+async def _index_chunks(paper_id: str, chunk_list: list[chunker.Chunk],
+                        meta=None) -> None:
+    """Embed the chunks of a paper and write the vector matrix.
+
+    The embedded text carries the paper's title, authors and year in front of
+    the chunk, so that the dense channel is aware of the metadata as well.
+    """
     if not chunk_list:
         return
     service = get_embedding_service()
     store = VectorStore()
 
+    header = ""
+    if meta is not None and getattr(get_settings(), "metadata_aware_embedding", True):
+        header = meta_aware.metadata_header(
+            getattr(meta, "title", ""), getattr(meta, "authors", None),
+            getattr(meta, "year", None))
+    texts = [f"{header}\n{c.content}" if header else c.content for c in chunk_list]
+
     vectors: list[Any] = []
     batch = 8
-    for start in range(0, len(chunk_list), batch):
-        piece = chunk_list[start : start + batch]
-        vecs = await asyncio.to_thread(service.encode, [c.content for c in piece])
+    for start in range(0, len(texts), batch):
+        piece = texts[start : start + batch]
+        vecs = await asyncio.to_thread(service.encode, piece)
         if vecs is None:
             break
         vectors.append(vecs)

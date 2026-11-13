@@ -13,12 +13,14 @@ from sqlalchemy import select
 
 from app.agents.orchestrator import AgentContext, AgentOrchestrator
 from app.core.events import get_bus, session_channel
+from app.core.logging import get_logger
 from app.services import agent as agent_service
 from app.services import papers as paper_service
 from app.storage.db import session_scope
 from app.storage.models import ChatMessage
 
 router = APIRouter(prefix="/rag", tags=["rag"])
+logger = get_logger(__name__)
 
 
 class AskRequest(BaseModel):
@@ -72,9 +74,6 @@ async def ask(req: AskRequest):
                             final.get("citations", []))
         yield "data: [DONE]\n\n"
 
-    from app.core.logging import get_logger
-
-    logger = get_logger(__name__)
     return StreamingResponse(event_stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache",
                                       "X-Accel-Buffering": "no"})

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
@@ -65,11 +65,33 @@ async def session_scope() -> AsyncIterator[AsyncSession]:
 
 
 async def init_db() -> None:
-    """Create every table (idempotent)."""
+    """Create every table (idempotent) and bring an old database up to date."""
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_add_missing_columns)
     logger.info("database initialised (%s)", engine.url)
+
+
+# Columns that were added to the schema after the first release.  SQLite has
+# no "ALTER TABLE ... ADD COLUMN IF NOT EXISTS", so the columns are checked
+# and added one by one.
+_ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("chunks", "section_title", "TEXT DEFAULT ''"),
+)
+
+
+def _add_missing_columns(connection) -> None:  # pragma: no cover - driver hook
+    for table, column, ddl in _ADDED_COLUMNS:
+        rows = connection.execute(
+            text(f"PRAGMA table_info({table})")
+        ).fetchall()
+        if not rows:
+            continue
+        if any(r[1] == column for r in rows):
+            continue
+        connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+        logger.info("added missing column %s.%s", table, column)
 
 
 async def dispose_db() -> None:

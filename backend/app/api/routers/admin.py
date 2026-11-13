@@ -99,7 +99,10 @@ async def reindex() -> dict:
                 .order_by(ChunkModel.ordinal))).scalars().all()
             if not chunks:
                 continue
-            payload = [{"content": c.content} for c in chunks]
+            payload = [{"content": c.content,
+                        "paper_title": p.title,
+                        "paper_authors": p.authors or [],
+                        "paper_year": p.year} for c in chunks]
             matrix = await embed_chunks(payload, service=service)
             if matrix is None:
                 report.append({"paper_id": p.id, "status": "skipped (no dense model)"})
