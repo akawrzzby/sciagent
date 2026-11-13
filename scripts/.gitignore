@@ -22,3 +22,26 @@ probe_author_band.py
 seed_one.sh
 probe_audit.py
 probe_thinking.py
+
+# Credential / network probes -- these read ~/.git-credentials and must never
+# become part of the public repository.
+probe_api.py
+probe_cred.py
+probe_github.py
+
+# One-off host diagnostics (Docker Desktop / WSL2 / VHDX on the author's
+# Windows machine).  Kept locally for reference.
+diag_vhd.ps1
+diag_volumes.ps1
+diag_wsl2.ps1
+reset_docker_wsl.ps1
+probe_vhd.txt
+
+# Ad-hoc orchestration helpers used to chain long server-side runs.
+chain_ab.sh
+chain_after_suite.sh
+diag_server.sh
+
+# Scratch analysis helpers.
+inspect_eval_shape.py
+which_papers.py

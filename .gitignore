@@ -46,6 +46,8 @@ logs/
 
 # ---- 日志 ----
 *.log
+*.log.err
+*.log.out
 
 # ---- 编辑器 / IDE ----
 .idea/
