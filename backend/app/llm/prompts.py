@@ -27,7 +27,13 @@ Operating rules:
 4. STRUCTURE — Answer in Markdown. Use short paragraphs and, when comparing
    several papers, a Markdown comparison table.
 5. UNCERTAINTY — If the evidence is ambiguous or partial, state the ambiguity
-   instead of guessing."""
+   instead of guessing.
+6. TABLES — When you use a Markdown table, put the citation tag inside the
+   cell that states the value, for example "| BLEU (WMT 2014 En-De) | 41.0 [1] |",
+   so that every number stays attached to the passage that supports it.
+7. BREVITY — Reason briefly. Answer with one short paragraph plus a table when
+   the evidence is tabular. Do not restate the evidence, and do not narrate
+   your own reasoning process in the answer."""
 
 SYSTEM_MULTI = """You are SciAgent performing CROSS-PAPER reasoning.
 
@@ -40,8 +46,15 @@ Rules:
 2. Be explicit about what the evidence says. If a comparison point is not
    covered by the evidence, write "not stated in the provided papers".
 3. Prefer a Markdown table for parameter/architecture comparisons followed by a
-   short analysis paragraph.
-4. Never invent numbers. If a value is missing, say so explicitly."""
+   short analysis paragraph. Put the citation tag INSIDE the cell that states
+   the value, for example "| BLEU (WMT 2014 En-De) | 41.0 [1] | 28.4 [3] |",
+   so that every number stays attached to the passage that supports it.
+4. Never invent numbers. If a value is missing, say so explicitly.
+5. The table is not a substitute for the prose: follow it with a paragraph
+   that states the comparison in words and carries the citation tags.
+6. BREVITY — Reason briefly and keep the answer to one table plus a short
+   paragraph. Do not restate the evidence, and do not narrate your own
+   reasoning process in the answer."""
 
 SYSTEM_PLANNER = """You are the planning module of SciAgent.
 

@@ -52,9 +52,32 @@ class Settings(BaseSettings):
     llm_api_key: str = ""  # optional; vLLM usually runs without auth
     llm_timeout: int = 300
     llm_max_tokens: int = 4096
+    # The answer generation gets a budget of its own.  The model reasons
+    # before it writes, and on a large cross-paper prompt the reasoning
+    # channel can eat the whole budget and leave no answer at all -- the call
+    # still comes back "ok" because the finish reason is ``length``.
+    llm_answer_max_tokens: int = 8192
+    # Whether the model may spend tokens on the reasoning channel.
+    #
+    # The agent phase (router / planner / tool calling) keeps it on: there the
+    # reasoning is what makes the tool sequence sensible, and it is streamed to
+    # the interface as the "thinking" panel.
+    llm_thinking: bool = True
+    # The answer phase turns it off.  Measured on the GPU host with the
+    # competition question set: with reasoning on, a cross-paper prompt made
+    # the model spend the whole token budget before writing a single
+    # character of the answer (4.2s / 166 completion tokens on a simple
+    # question, 214s / 4096 tokens and *no* answer on a cross-paper one);
+    # with it off the same answer takes 0.8s / 34 tokens.  The answer is
+    # grounded in the evidence block either way, and the agent's reasoning
+    # stays visible in the tool-call phase.
+    llm_answer_thinking: bool = False
     llm_temperature: float = 0.2
     # Upper bound on how many documents may participate in one multi-paper reasoning call.
     llm_max_context_papers: int = 12
+    # How many times the agent may look again when its answer is not covered
+    # by the evidence it cites (the self-feedback loop).
+    agent_max_refine_rounds: int = 2
 
     # ------------------------------------------------------------------ embedding
     # Dense retriever. bge-m3 is multilingual (1024-dim) which matters for the
@@ -82,6 +105,15 @@ class Settings(BaseSettings):
     retrieve_top_k_final: int = 8
     # Minimum fused score required before a passage may be used as evidence.
     retrieve_min_score: float = 0.0
+    # How much a paper's metadata (title, authors, year) may lift the score of
+    # its passages when the query names that paper.  0 disables the boost.
+    metadata_boost: float = 0.30
+    # Whether the metadata is carried into the dense vectors, into the
+    # cross-encoder input, or into both.  The switches exist so that the
+    # effect of the metadata aware retrieval can be measured instead of
+    # asserted (see ``scripts/eval_retrieval.py``).
+    metadata_aware_embedding: bool = True
+    metadata_aware_rerank: bool = True
 
     # ------------------------------------------------------------------ parsing
     # DPI used when rasterising pages for OCR / VLM reading.

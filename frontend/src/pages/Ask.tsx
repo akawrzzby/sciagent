@@ -27,6 +27,14 @@ interface TraceStep {
   summary?: string
 }
 
+interface RefineRound {
+  round: number
+  reason: string
+  gap: string
+  added: number
+  total: number
+}
+
 interface Turn {
   question: string
   answer: string
@@ -34,6 +42,7 @@ interface Turn {
   trace: TraceStep[]
   thinking: string[]
   tools: { name: string; summary: string }[]
+  refines: RefineRound[]
   intent?: string
   plan?: Record<string, unknown>
   guardrail?: Record<string, unknown>
@@ -74,6 +83,7 @@ export default function Ask() {
       trace: [],
       thinking: [],
       tools: [],
+      refines: [],
       streaming: true,
     }
     setTurns((t) => [...t, turn])
@@ -118,6 +128,44 @@ export default function Ask() {
               break
             case 'delta':
               patch((t) => ({ ...t, answer: t.answer + String(ev.text ?? '') }))
+              break
+            case 'refine':
+              patch((t) => ({
+                ...t,
+                refines: [
+                  ...t.refines,
+                  {
+                    round: Number(ev.round ?? 0),
+                    reason: String(ev.reason ?? 'evidence_gap'),
+                    gap: String(ev.gap ?? ''),
+                    added: 0,
+                    total: 0,
+                  },
+                ],
+              }))
+              break
+            case 'refine_result':
+              patch((t) => ({
+                ...t,
+                refines: t.refines.map((r, i, arr) =>
+                  i === arr.length - 1
+                    ? {
+                        ...r,
+                        added: Number(ev.added_evidence ?? 0),
+                        total: Number(ev.evidence_total ?? 0),
+                      }
+                    : r,
+                ),
+              }))
+              break
+            case 'generation_failed':
+              patch((t) => ({
+                ...t,
+                thinking: [
+                  ...t.thinking,
+                  `[生成失败] ${String(ev.reason ?? '未知原因')}，正在补检索后重试`,
+                ],
+              }))
               break
             case 'guardrail':
               patch((t) => ({ ...t, guardrail: ev as Record<string, unknown> }))
@@ -218,7 +266,7 @@ export default function Ask() {
               </div>
 
               {/* agent trace */}
-              {showThinking && (t.thinking.length > 0 || t.tools.length > 0 || t.plan) && (
+              {showThinking && (t.thinking.length > 0 || t.tools.length > 0 || t.plan || t.refines.length > 0) && (
                 <details className="panel overflow-hidden" open>
                   <summary className="panel-header cursor-pointer select-none">
                     <span className="panel-title flex items-center gap-2">
@@ -232,6 +280,7 @@ export default function Ask() {
                     </span>
                     <span className="font-sans text-[10px] text-ink-400">
                       {t.tools.length} 次工具调用
+                      {t.refines.length > 0 && ` · ${t.refines.length} 轮自反馈`}
                     </span>
                   </summary>
                   <div className="space-y-3 px-4 py-3">
@@ -263,6 +312,30 @@ export default function Ask() {
                               </span>
                               <span className="ml-2 font-sans text-[11px] text-ink-500 dark:text-ink-400">
                                 {tool.summary}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {t.refines.length > 0 && (
+                      <div className="space-y-1">
+                        {t.refines.map((r) => (
+                          <div
+                            key={r.round}
+                            className="flex items-start gap-2 rounded-md border border-amber-300/70 bg-amber-50/60 px-2.5 py-1.5 dark:border-amber-800/70 dark:bg-amber-950/30"
+                          >
+                            <span className="mt-0.5 font-mono text-[10px] text-amber-600">↻</span>
+                            <div className="min-w-0">
+                              <span className="font-sans text-[10.5px] font-semibold text-amber-700 dark:text-amber-300">
+                                自反馈第 {r.round} 轮
+                              </span>
+                              <span className="ml-2 font-sans text-[11px] text-ink-500 dark:text-ink-400">
+                                {r.reason === 'empty_answer'
+                                  ? '生成结果为空，补检索后重试'
+                                  : '证据存在缺口，补检索后重写'}
+                                {r.added > 0 && ` · 新增 ${r.added} 条证据（累计 ${r.total}）`}
                               </span>
                             </div>
                           </div>
@@ -320,7 +393,21 @@ export default function Ask() {
                             <span className="truncate font-sans text-[10.5px] text-ink-500 dark:text-ink-400">
                               {c.paper_title || c.paper_id} · p.{c.page_no}
                             </span>
+                            {typeof c.metadata_affinity === 'number' &&
+                              c.metadata_affinity > 0 && (
+                                <span
+                                  title="问题与该论文元数据（标题 / 作者 / 年份）的匹配度"
+                                  className="ml-auto shrink-0 rounded bg-accent-500/12 px-1 py-px font-sans text-[9.5px] font-semibold text-accent-700 dark:text-accent-300"
+                                >
+                                  元数据 {Math.round(c.metadata_affinity * 100)}%
+                                </span>
+                              )}
                           </div>
+                          {c.section_title && (
+                            <div className="mt-0.5 truncate font-sans text-[10px] text-ink-400 dark:text-ink-500">
+                              § {c.section_title}
+                            </div>
+                          )}
                           <div className="mt-0.5 line-clamp-2 font-sans text-[10.5px] leading-snug text-ink-400">
                             {c.quote}
                           </div>
@@ -336,7 +423,12 @@ export default function Ask() {
                     <span>✓</span>
                     <span>
                       护栏校验：
-                      {t.guardrail.supported ? '所有引用均有证据支撑' : `已移除 ${String(t.guardrail.dropped_citations ?? '')} 个无据引用`}
+                      {t.guardrail.supported
+                        ? '所有引用均有证据支撑'
+                        : String(
+                            t.guardrail.note ??
+                              `已移除 ${String(t.guardrail.dropped_citations ?? '')} 个无据引用`,
+                          )}
                     </span>
                   </div>
                 )}

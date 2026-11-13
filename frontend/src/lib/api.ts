@@ -101,6 +101,8 @@ export interface Citation {
   quote: string
   score: number
   source?: string
+  /** How strongly the query matched the paper's metadata (0..1). */
+  metadata_affinity?: number
 }
 
 export interface Passage extends Citation {
@@ -115,8 +117,11 @@ export interface Passage extends Citation {
 export interface GraphNode {
   paper_id: string
   title: string
+  label: string
   year: number | null
   arxiv_id: string
+  version_label: string
+  is_scanned: boolean
   in_degree: number
   out_degree: number
   pagerank: number
@@ -135,6 +140,62 @@ export interface GraphEdge {
   target: string
   relevance: number
   context: string
+  stance: 'supporting' | 'contrasting' | 'mentioning'
+  stance_label: string
+  stance_reason: string
+  /** citation | co_citation | co_reference */
+  kind?: string
+  /** How many shared items the two papers have (similarity edges). */
+  weight?: number
+  label?: string
+  shared_citing_papers?: string[]
+  shared_references?: string[]
+}
+
+export interface ConflictSide {
+  metric: string
+  value: number
+  unit: string
+  text: string
+  context: string
+  paper_id: string
+  paper_title: string
+  page_no: number
+  chunk_id: string
+}
+
+export interface Conflict {
+  kind: 'numeric' | 'claim'
+  metric: string
+  summary: string
+  left: ConflictSide
+  right: ConflictSide
+  delta: number | null
+  confidence: number
+  reason: string
+}
+
+export interface ContradictionResult {
+  conflicts: Conflict[]
+  count: number
+  numeric_count: number
+  claim_count: number
+  papers_involved: string[]
+  scanned_chunks: number
+  markdown?: string
+  note?: string
+}
+
+export interface CitationRef {
+  title: string
+  authors: string[]
+  year: number | null
+  relevance?: number
+  context?: string
+  stance?: 'supporting' | 'contrasting' | 'mentioning'
+  stance_label?: string
+  stance_reason?: string
+  citation_count?: number
 }
 
 export interface CitationGraph {
@@ -237,8 +298,13 @@ export const api = {
     ),
 
   /* ---- graph ---- */
-  graph: (paperIds: string[] = []) =>
-    request<CitationGraph>('/graph', { method: 'POST', body: JSON.stringify({ paper_ids: paperIds }) }),
+  graph: (paperIds: string[] = [], view: string = 'citation') =>
+    request<CitationGraph>('/graph', { method: 'POST', body: JSON.stringify({ paper_ids: paperIds, view }) }),
+  contradictions: (paperIds: string[] = []) =>
+    request<ContradictionResult>('/graph/contradictions', {
+      method: 'POST',
+      body: JSON.stringify({ paper_ids: paperIds }),
+    }),
   futureWork: (paperIds: string[] = []) =>
     request<{
       statements: { text: string; paper_title: string; page_no: number }[]
@@ -262,9 +328,14 @@ export const api = {
       graph: CitationGraph
     }>('/graph/review', { method: 'POST', body: JSON.stringify({ paper_ids: paperIds }) }),
   citationQuality: (paperId: string) =>
-    request<{ kept: unknown[]; dropped: unknown[]; kept_count: number; dropped_count: number }>(
-      `/graph/citations/quality?paper_id=${paperId}`,
-    ),
+    request<{
+      kept: CitationRef[]
+      dropped: CitationRef[]
+      kept_count: number
+      dropped_count: number
+      threshold: number
+      stance_counts: Record<string, number>
+    }>(`/graph/citations/quality?paper_id=${paperId}`),
 
   /* ---- search / recommend ---- */
   arxivSearch: (query: string, maxResults = 10) =>

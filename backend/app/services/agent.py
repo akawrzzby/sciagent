@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from typing import Any, Sequence
 
 from sqlalchemy import select
@@ -42,20 +43,22 @@ def get_retriever() -> HybridRetriever:
 async def load_chunks(paper_ids: Sequence[str] | None = None) -> list[dict[str, Any]]:
     """Load the chunk pool (optionally restricted to a subset of papers)."""
     async with session_scope() as db:
-        stmt = select(Chunk, Paper.title).join(Paper, Chunk.paper_id == Paper.id)
+        stmt = (select(Chunk, Paper.title, Paper.authors, Paper.year)
+                .join(Paper, Chunk.paper_id == Paper.id))
         if paper_ids:
             stmt = stmt.where(Chunk.paper_id.in_(list(paper_ids)))
         rows = (await db.execute(stmt.order_by(Chunk.paper_id, Chunk.ordinal))).all()
         return [
             {
                 "id": chunk.id, "paper_id": chunk.paper_id, "paper_title": title,
+                "paper_authors": authors or [], "paper_year": year,
                 "ordinal": chunk.ordinal, "content": chunk.content,
                 "page_no": chunk.page_no, "section_title": chunk.section_title or "",
                 "char_start": chunk.char_start, "char_end": chunk.char_end,
                 "kind": chunk.kind, "embedding_row": chunk.embedding_row,
                 "score": 0.0,
             }
-            for chunk, title in rows
+            for chunk, title, authors, year in rows
         ]
 
 
@@ -68,7 +71,8 @@ async def load_papers(paper_ids: Sequence[str] | None = None) -> list[dict[str, 
         return [
             {"paper_id": p.id, "title": p.title, "year": p.year, "arxiv_id": p.arxiv_id,
              "doi": p.doi, "authors": p.authors or [], "venue": p.venue,
-             "abstract": p.abstract}
+             "abstract": p.abstract, "version_label": p.version_label or "",
+             "is_scanned": bool(p.is_scanned)}
             for p in rows
         ]
 
@@ -106,6 +110,11 @@ async def load_references(paper_ids: Sequence[str]) -> list[dict[str, Any]]:
         ref["relevance"] = graph_builder.compute_citation_relevance(
             ref["context"], ref["title"]
         )
+        stance = graph_builder.classify_citation_context(ref["context"], ref["title"])
+        ref["stance"] = stance.stance
+        ref["stance_label"] = graph_builder.CITATION_STANCE_LABEL.get(stance.stance, "")
+        ref["stance_confidence"] = stance.confidence
+        ref["stance_reason"] = stance.reason
     return refs
 
 

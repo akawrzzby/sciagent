@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Sequence
@@ -137,6 +138,8 @@ class AgentOrchestrator:
         self.plan: dict[str, Any] = {}
         self.intent: str = ""
         self.intent_confidence: float = 0.0
+        self.refine_rounds: int = 0
+        self.generation_error: str = ""
         self._pending: list[dict[str, Any]] = []
         self.final_answer: str = ""
         self.final_citations: list[dict[str, Any]] = []
@@ -189,16 +192,40 @@ class AgentOrchestrator:
         for _event in self._drain():
             yield _event
 
+        # --- 4b. self feedback: fill the evidence gaps --------------------
+        # The answer is checked against the evidence that it cites.  A claim
+        # that its own citation does not support is an evidence gap, and a gap
+        # is a question, not a failure: the agent looks again.
+        async for event in self._refine_loop():
+            yield event
+        answer, citations = self.final_answer, self.final_citations
+        for _event in self._drain():
+            yield _event
+
         # --- 5. reflection ----------------------------------------------
+        # The guardrail sees the answer as it is: an empty answer is a
+        # failure, not a result that happens to have no unsupported claims.
         report = self._reflect(answer, citations)
         await self._emit("guardrail", **report.to_dict())
         for _event in self._drain():
             yield _event
 
+        # An answer that is still empty after the self-feedback loop is a
+        # failure.  An honest refusal is better than an empty string with a
+        # green guardrail badge.
+        if not (answer or "").strip():
+            self.final_answer = guardrails.build_abstention_message()
+            self.final_citations = []
+            report.answer = self.final_answer
+            await self._emit("abstain", reason="empty_answer")
+            for _event in self._drain():
+                yield _event
+            answer, citations = self.final_answer, self.final_citations
+
         final_answer = report.answer
         yield {"type": "final", "answer": final_answer, "citations": citations,
                "intent": self.intent, "plan": self.plan, "trace": self.trace,
-               "guardrail": report.to_dict()}
+               "guardrail": report.to_dict(), "refine_rounds": self.refine_rounds}
 
     # ------------------------------------------------------------------ routing
     async def _route(self) -> None:
@@ -384,8 +411,18 @@ class AgentOrchestrator:
             self.evidence.append(item)
 
     # ------------------------------------------------------------------ generation
-    async def _generate_answer(self) -> AsyncIterator[dict[str, Any]]:
-        """Phase 2: write the grounded answer (streamed)."""
+    async def _generate_answer(self, *, stream_deltas: bool = True,
+                               max_tokens: int | None = None) -> AsyncIterator[dict[str, Any]]:
+        """Phase 2: write the grounded answer (streamed).
+
+        An empty answer is a *failure*, not a result.  The model reasons before
+        it writes, and on a large cross-paper prompt the reasoning channel can
+        consume the whole token budget and leave no answer at all -- and the
+        call still comes back "ok", because the finish reason is ``length``
+        and not ``error``.  Accepting that as an answer produced an empty
+        string with a green guardrail badge, so the failure is detected here
+        and handed to the self-feedback loop.
+        """
         evidence_block = self._render_evidence()
         system = prompts.SYSTEM_MULTI if self.intent == "multi_compare" else prompts.SYSTEM_QA
         if not self.evidence:
@@ -402,10 +439,17 @@ class AgentOrchestrator:
             "Do not mention the phrase 'EVIDENCE' in your answer."
         )
 
+        budget = max_tokens or int(getattr(self.settings, "llm_answer_max_tokens", 0) or 0) or None
+        # The answer step does not need the reasoning channel: the evidence is
+        # already in the prompt, and letting the model reason first is what
+        # used to eat the whole token budget (see ``llm_answer_thinking``).
+        answer_thinking = bool(getattr(self.settings, "llm_answer_thinking", False))
         answer_parts: list[str] = []
+        failure = ""
         async for frame in self.llm.stream(
             [{"role": "system", "content": system}, {"role": "user", "content": user}],
             temperature=0.1, session_id=self.context.session_id, purpose="agent:answer",
+            max_tokens=budget, thinking=answer_thinking,
         ):
             kind = frame.get("type")
             if kind == "reasoning":
@@ -416,22 +460,235 @@ class AgentOrchestrator:
             elif kind == "delta":
                 text = frame.get("text", "")
                 answer_parts.append(text)
-                await self._emit("delta", text=text)
-                for _event in self._drain():
-                    yield _event
+                if stream_deltas:
+                    await self._emit("delta", text=text)
+                    for _event in self._drain():
+                        yield _event
+            elif kind == "error":
+                # The call failed outright (timeout, transport error, ...).
+                failure = str(frame.get("message", ""))[:300] or "大模型调用失败"
+                break
             elif kind == "done":
                 resp = frame.get("response")
-                if resp is not None and resp.content and not "".join(answer_parts).strip():
-                    answer_parts = [resp.content]
+                if resp is not None:
+                    content = (getattr(resp, "content", "") or "").strip()
+                    if content and not "".join(answer_parts).strip():
+                        answer_parts = [content]
+                    if not content and not "".join(answer_parts).strip():
+                        reason = str(getattr(resp, "finish_reason", "") or "")
+                        failure = failure or f"模型未产出正文（finish_reason={reason or 'unknown'}）"
 
+        self.generation_error = ""
         self.final_answer = "".join(answer_parts).strip()
-        self.final_citations = [e.citation() for e in self.evidence]
+        self.final_citations = self._build_citations()
+        if self._repair_citations():
+            self.final_citations = self._build_citations()
+        if not self.final_answer:
+            self.generation_error = failure or "模型未产出正文"
+            await self._emit("generation_failed", reason=self.generation_error,
+                              budget=int(budget or 0))
+
+    def _repair_citations(self) -> int:
+        """Point the citation tags at the evidence that actually backs them.
+
+        The model sometimes cites a neighbouring block: the author list sits in
+        [3] but the answer points at [9].  The claim itself is right, only the
+        pointer is wrong, and the reader cannot check it.  The repair is rule
+        based and conservative -- a claim is re-pointed only when the block it
+        cites does not support it and another block of the evidence does.
+        """
+        from app.rag import evaluation
+
+        claims = evaluation.extract_claims(self.final_answer)
+        by_index = {e.index: e for e in self.evidence}
+        if not by_index:
+            return 0
+
+        def _supports(claim_text: str, passage: str) -> bool:
+            if evaluation.coverage(claim_text, passage) < evaluation.FAITHFULNESS_THRESHOLD:
+                return False
+            return evaluation.critical_coverage(claim_text, passage) >= 1.0
+
+        cursor = 0
+        edits: list[tuple[int, int, str]] = []
+        for claim in claims:
+            if not claim.citations:
+                continue
+            # The claim text is a verbatim part of the answer, so the tags
+            # of this claim -- and only those -- can be located.
+            start = self.final_answer.find(claim.text, cursor)
+            if start < 0:
+                continue
+            cursor = start + len(claim.text)
+            tags = list(re.finditer(r"\[\d{1,3}\]", claim.text))
+            if not tags:
+                continue
+
+            core = claim.core or claim.text
+            if any(_supports(core, by_index[t].text)
+                   for t in claim.citations if t in by_index):
+                continue
+
+            best = next((e.index for e in self.evidence
+                         if _supports(core, e.text)), None)
+            if best is None:
+                continue
+
+            # One tag, pointing at the passage that backs the claim.
+            first = start + tags[0].start()
+            last = start + tags[-1].end()
+            edits.append((first, last, "[%d]" % best))
+
+        if not edits:
+            return 0
+        for start, end, text in reversed(edits):
+            self.final_answer = self.final_answer[:start] + text + self.final_answer[end:]
+        return len(edits)
+
+    def _build_citations(self) -> list[dict[str, Any]]:
+        """The citations of the answer, each quoting the part that backs it.
+
+        A citation quotes the window of the passage that matches the claims
+        pointing at it -- the original sentence the reader has to check -- and
+        not the first 320 characters of the chunk, which on a page of
+        extracted text is usually the paper header.
+        """
+        from app.rag import evaluation
+
+        by_index: dict[int, list[str]] = {}
+        for claim in evaluation.extract_claims(self.final_answer):
+            for tag in claim.citations:
+                by_index.setdefault(tag, []).append(claim.text)
+
+        citations: list[dict[str, Any]] = []
+        for e in self.evidence:
+            item = e.citation()
+            item["quote"] = evaluation.best_supporting_window(
+                e.text, by_index.get(e.index, []))
+            citations.append(item)
+        return citations
 
     def _render_evidence(self) -> str:
         parts = []
         for e in self.evidence:
             parts.append(e.render())
         return "\n\n".join(parts)
+
+    # ------------------------------------------------------------------ self feedback
+    async def _refine_loop(self) -> AsyncIterator[dict[str, Any]]:
+        """Look again when the answer is not covered by the evidence it cites.
+
+        This is the self-feedback loop of OpenScholar (arXiv:2411.14199):
+        the answer is checked against its own citations, the claims that the
+        citations do not support become a new query, and the answer is written
+        again with the additional passages.
+
+        The check is the *rule based* one of :mod:`app.rag.evaluation`, not an
+        LLM judge -- Agent Laboratory (arXiv:2501.04227) shows that an LLM
+        reviewer over-rates its own work by a wide margin.
+        """
+        max_rounds = int(getattr(self.settings, "agent_max_refine_rounds", 2) or 0)
+        if max_rounds <= 0 or not self.evidence:
+            return
+
+        for round_no in range(1, max_rounds + 1):
+            report = self._coverage_report()
+            empty = not (self.final_answer or "").strip()
+            if empty:
+                # Nothing was written at all.  That is a gap too, and the
+                # question itself is the best query to look again with.
+                reason = "empty_answer"
+                query = self.context.question
+            else:
+                if report is None or not report.unsupported:
+                    break
+                reason = "evidence_gap"
+                query = self._gap_query(report.unsupported)
+            if not query:
+                break
+
+            self.refine_rounds = round_no
+            await self._emit(
+                "refine", round=round_no, reason=reason,
+                gap=query[:200],
+                unsupported=len(report.unsupported) if report else 0,
+                faithfulness=round(report.faithfulness, 4) if report else 0.0,
+                claim_count=len(report.claims) if report else 0,
+            )
+            for _event in self._drain():
+                yield _event
+
+            added = await self._search_more(query)
+            await self._emit("refine_result", round=round_no, added_evidence=added,
+                             evidence_total=len(self.evidence),
+                             faithfulness=round(report.faithfulness, 4) if report else 0.0)
+            for _event in self._drain():
+                yield _event
+            if added == 0 and not empty:
+                break
+
+            # Write the answer again -- this time without streaming the text,
+            # because the previous draft is replaced.  After an empty answer the
+            # retry gets a larger token budget: the first attempt most likely
+            # ran out of tokens while thinking.
+            retry_budget = None
+            if empty:
+                base = int(getattr(self.settings, "llm_answer_max_tokens", 0) or 0)
+                retry_budget = base * 2 if base else None
+            async for event in self._generate_answer(stream_deltas=False,
+                                                     max_tokens=retry_budget):
+                yield event
+
+    def _coverage_report(self):
+        """The rule based coverage of the answer by its own citations."""
+        from app.rag import evaluation
+
+        if not self.final_answer or not self.final_citations:
+            return None
+        # The check runs against the whole passage, not against the short
+        # quote that the user is shown.
+        texts = {e.index: e.text for e in self.evidence}
+        citations = [
+            {**c, "text": texts.get(int(c.get("index", 0) or 0), "")}
+            for c in self.final_citations
+        ]
+        return evaluation.evaluate_answer(self.final_answer, citations)
+
+    @staticmethod
+    def _gap_query(unsupported: list[Any]) -> str:
+        """A retrieval query built from the claims that are not supported."""
+        from app.rag import evaluation
+
+        words: list[str] = []
+        seen: set[str] = set()
+        for claim in unsupported:
+            for token in evaluation.content_tokens(claim.text):
+                if len(token) < 4 or token in seen:
+                    continue
+                seen.add(token)
+                words.append(token)
+        return " ".join(words[:14])
+
+    async def _search_more(self, query: str) -> int:
+        """One more retrieval round with the gap query."""
+        if self.registry is None:
+            return 0
+        before = len(self.evidence)
+        try:
+            result = await self.registry.execute(
+                "search_library", {"query": query, "top_k": 6})
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("refine search failed: %s", exc)
+            return 0
+        self._absorb_evidence("search_library", result)
+        added = len(self.evidence) - before
+        self.trace.append({
+            "step": len(self.trace), "type": "refine", "name": "search_library",
+            "arguments": {"query": query, "top_k": 6},
+            "summary": f"补充检索 {added} 条证据",
+            "latency_ms": 0,
+        })
+        return added
 
     # ------------------------------------------------------------------ reflection
     def _reflect(self, answer: str, citations: list[dict[str, Any]]) -> Any:
@@ -443,6 +700,12 @@ class AgentOrchestrator:
         if not self.evidence:
             report.supported = False
             report.note = "没有检索到任何证据，已改为拒答"
+        elif not (answer or "").strip():
+            # No answer at all is not "supported" -- there is simply nothing to
+            # check.  An empty answer used to come back with a green badge.
+            report.supported = False
+            detail = f"（{self.generation_error}）" if self.generation_error else ""
+            report.note = f"生成结果为空，没有可校验的断言{detail}"
         elif report.dropped_citations:
             report.note = (report.note or "") + "；这些引用没有对应的证据段落"
         return report

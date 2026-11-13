@@ -140,6 +140,7 @@ class LLMClient:
         response_format: dict[str, Any] | None = None,
         session_id: str = "",
         purpose: str = "",
+        thinking: bool | None = None,
     ) -> LLMResponse:
         """Run a non-streaming chat completion and return a normalised response."""
         settings = get_settings()
@@ -149,6 +150,10 @@ class LLMClient:
             "temperature": settings.llm_temperature if temperature is None else temperature,
             "max_tokens": max_tokens or settings.llm_max_tokens,
         }
+        if thinking is not None:
+            # Qwen3-style chat templates switch the reasoning channel with
+            # ``enable_thinking``; vLLM forwards it through extra body.
+            payload["chat_template_kwargs"] = {"enable_thinking": thinking}
         if tools:
             payload["tools"] = list(tools)
             payload["tool_choice"] = tool_choice or "auto"
@@ -194,6 +199,7 @@ class LLMClient:
         max_tokens: int | None = None,
         session_id: str = "",
         purpose: str = "",
+        thinking: bool | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """Stream a chat completion.
 
@@ -209,6 +215,8 @@ class LLMClient:
             "stream": True,
             "stream_options": {"include_usage": True},
         }
+        if thinking is not None:
+            payload["chat_template_kwargs"] = {"enable_thinking": thinking}
         if tools:
             payload["tools"] = list(tools)
             payload["tool_choice"] = tool_choice or "auto"
