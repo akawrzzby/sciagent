@@ -36,7 +36,7 @@ from pathlib import Path
 CSS = """
 @page {
   size: A4;
-  margin: 17mm 15mm 18mm 15mm;
+  margin: 13mm 12mm 14mm 12mm;
 }
 :root {
   --ink: #1d2836;
@@ -51,8 +51,8 @@ html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 body {
   font-family: "Source Serif 4", "Noto Serif SC", Georgia, "Songti SC", serif;
   color: var(--ink);
-  font-size: 10.2pt;
-  line-height: 1.62;
+  font-size: 9.3pt;
+  line-height: 1.44;
   margin: 0;
 }
 h1, h2, h3, h4, h5 {
@@ -63,40 +63,40 @@ h1, h2, h3, h4, h5 {
   break-after: avoid;
 }
 h1 {
-  font-size: 17pt;
-  margin: 0 0 10pt 0;
-  padding-bottom: 5pt;
+  font-size: 15pt;
+  margin: 0 0 7pt 0;
+  padding-bottom: 4pt;
   border-bottom: 2px solid var(--ink);
   page-break-before: always;
   break-before: page;
 }
 .cover h1 { page-break-before: avoid; break-before: auto; border: none; }
-h2 { font-size: 13pt; margin: 15pt 0 6pt 0; }
-h3 { font-size: 11.2pt; margin: 12pt 0 4pt 0; color: var(--ink-soft); }
-h4 { font-size: 10.4pt; margin: 10pt 0 3pt 0; color: var(--ink-soft); }
-p { margin: 0 0 6pt 0; text-align: justify; }
-ul, ol { margin: 0 0 7pt 0; padding-left: 18pt; }
-li { margin: 1.5pt 0; }
-li > ul, li > ol { margin: 1.5pt 0; }
+h2 { font-size: 11.8pt; margin: 11pt 0 4pt 0; }
+h3 { font-size: 10.4pt; margin: 9pt 0 3pt 0; color: var(--ink-soft); }
+h4 { font-size: 9.8pt; margin: 8pt 0 2pt 0; color: var(--ink-soft); }
+p { margin: 0 0 4.5pt 0; text-align: justify; }
+ul, ol { margin: 0 0 5pt 0; padding-left: 16pt; }
+li { margin: 1pt 0; }
+li > ul, li > ol { margin: 1pt 0; }
 strong { color: var(--ink); }
 em { color: var(--ink-soft); }
 code {
   font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
-  font-size: 8.6pt;
+  font-size: 8.0pt;
   background: var(--soft);
   border: 1px solid #e8edf3;
   border-radius: 3px;
-  padding: 0.5pt 2.5pt;
+  padding: 0.4pt 2.2pt;
   word-break: break-all;
 }
 pre {
   font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
-  font-size: 8.2pt;
-  line-height: 1.45;
+  font-size: 7.5pt;
+  line-height: 1.38;
   background: #131b26;
   color: #f8f6f0;
   border-radius: 5px;
-  padding: 8pt 10pt;
+  padding: 6pt 8pt;
   overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-word;
@@ -105,8 +105,8 @@ pre {
 }
 pre code { background: none; border: none; color: inherit; padding: 0; font-size: inherit; }
 blockquote {
-  margin: 8pt 0;
-  padding: 5pt 10pt;
+  margin: 6pt 0;
+  padding: 4pt 8pt;
   border-left: 3px solid var(--accent);
   background: #fff8ed;
   color: var(--ink-soft);
@@ -114,13 +114,13 @@ blockquote {
   break-inside: avoid;
 }
 blockquote p:last-child { margin-bottom: 0; }
-hr { border: none; border-top: 1px solid var(--rule); margin: 12pt 0; }
+hr { border: none; border-top: 1px solid var(--rule); margin: 9pt 0; }
 table {
   width: 100%;
   border-collapse: collapse;
-  margin: 7pt 0 9pt 0;
+  margin: 5pt 0 7pt 0;
   font-family: "Inter", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
-  font-size: 8.4pt;
+  font-size: 7.7pt;
   page-break-inside: avoid;
   break-inside: avoid;
 }
@@ -128,10 +128,10 @@ th {
   background: #eef2f7;
   font-weight: 600;
   text-align: left;
-  padding: 3.6pt 5pt;
+  padding: 2.6pt 4pt;
   border: 1px solid var(--rule);
 }
-td { padding: 3.4pt 5pt; border: 1px solid var(--rule); vertical-align: top; }
+td { padding: 2.5pt 4pt; border: 1px solid var(--rule); vertical-align: top; }
 tr:nth-child(even) td { background: #fafbfd; }
 a { color: var(--accent); text-decoration: none; }
 img { max-width: 100%; }

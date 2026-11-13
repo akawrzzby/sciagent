@@ -9,6 +9,21 @@
 [![TypeScript](https://img.shields.io/badge/lang-TypeScript-3178C6?style=flat-square&logo=typescript)](https://www.typescriptlang.org/)
 [![Python](https://img.shields.io/badge/lang-Python%203.11-3776AB?style=flat-square&logo=python)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](#-license)
+[![docker-build](https://github.com/akawrzzby/sciagent/actions/workflows/docker-build.yml/badge.svg)](https://github.com/akawrzzby/sciagent/actions/workflows/docker-build.yml)
+
+### 实测数据（全部可复跑，脚本见 `scripts/`）
+
+| 指标 | 实测值 | 出处 |
+|---|---|---|
+| 回答忠实度 faithfulness | **0.7092**（三轮均值，区间 0.6378 – 0.7521） | `scripts/eval_rag.py` |
+| 引用可溯源率 traceability | **1.0000**（三轮全满） | `scripts/eval_rag.py` |
+| 库外问题诚实拒答率 | **3 / 3**，编造 0 | `scripts/eval_rag_control.py` |
+| 元数据感知检索 hit@5 | **0.9286 → 1.0000**（A/B，各自重建索引） | `scripts/eval_retrieval_ab.sh` |
+| 自动化测试 | **176 passed**（无网络、无 LLM） | `backend/tests/` |
+| 541 页书籍解析 | **149.4 s** / 1254 章节 / 131 万字符 | §6.5 |
+| 稠密编码吞吐 | **99.7 passages/s**（64 线程；192 线程默认仅 7.2） | §6.5 |
+
+> 指标口径、量具的五次修复过程、以及"单篇题接近满分、跨论文对比题只有 0.31–0.56"这一能力边界，见 [`docs/technical-report.md`](./docs/technical-report.md) §6.3。
 
 ---
 
