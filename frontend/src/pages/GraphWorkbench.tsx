@@ -15,11 +15,29 @@ import { useNavigate } from 'react-router-dom'
 import cytoscape, { Core, ElementDefinition, StylesheetStyle } from 'cytoscape'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { api, CitationGraph, GraphNode } from '../lib/api'
+import { api, CitationGraph, CitationRef, ContradictionResult, GraphEdge, GraphNode } from '../lib/api'
 import { EmptyState, Spinner, StatCard, Tabs, Toast } from '../components/ui'
 import { useSciStore } from '../store'
 
-type Panel = 'graph' | 'review' | 'future' | 'quality'
+type Panel = 'graph' | 'review' | 'future' | 'quality' | 'conflicts'
+
+/** The three edge views of the workbench (plus "all"). */
+type GraphView = 'citation' | 'co_citation' | 'co_reference' | 'all'
+/** The node view: everything, only the prior work, or only the derivatives. */
+type RoleView = 'all' | 'prior' | 'derivative'
+
+const VIEW_LABEL: Record<GraphView, string> = {
+  citation: '引用',
+  co_citation: '共引',
+  co_reference: '共参考',
+  all: '全部',
+}
+
+const EDGE_KIND_COLOR: Record<string, string> = {
+  citation: '#405670',
+  co_citation: '#dd6702',
+  co_reference: '#2f7f79',
+}
 
 interface ReviewResult {
   title: string
@@ -43,10 +61,12 @@ interface FutureResult {
 }
 
 interface QualityResult {
-  kept: { title: string; authors: string[]; year: number | null; relevance?: number }[]
-  dropped: { title: string; authors: string[]; year: number | null; reason?: string }[]
+  kept: CitationRef[]
+  dropped: CitationRef[]
   kept_count: number
   dropped_count: number
+  threshold?: number
+  stance_counts?: Record<string, number>
 }
 
 /* ------------------------------------------------------------------ palette */
@@ -61,6 +81,18 @@ const ROLE_LABEL: Record<GraphNode['role'], string> = {
   derivative: '衍生',
 }
 
+/* The stance of a citation, following the Smart Citations taxonomy. */
+const STANCE_COLOR: Record<string, string> = {
+  supporting: '#2f7f79',
+  contrasting: '#c2410c',
+  mentioning: '#a8b8ca',
+}
+const STANCE_LABEL: Record<string, string> = {
+  supporting: '支持',
+  contrasting: '对照',
+  mentioning: '提及',
+}
+
 export default function GraphWorkbench() {
   const navigate = useNavigate()
   const selected = useSciStore((s) => s.selected)
@@ -69,21 +101,25 @@ export default function GraphWorkbench() {
   const [loading, setLoading] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [activeNode, setActiveNode] = useState<GraphNode | null>(null)
+  const [activeEdge, setActiveEdge] = useState<GraphEdge | null>(null)
   const [review, setReview] = useState<ReviewResult | null>(null)
   const [future, setFuture] = useState<FutureResult | null>(null)
   const [quality, setQuality] = useState<QualityResult | null>(null)
   const [qualityPaper, setQualityPaper] = useState('')
   const [busyPanel, setBusyPanel] = useState<Panel | null>(null)
+  const [view, setView] = useState<GraphView>('citation')
+  const [roleView, setRoleView] = useState<RoleView>('all')
+  const [conflicts, setConflicts] = useState<ContradictionResult | null>(null)
 
   const container = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
 
   /* ------------------------------------------------------------ build graph */
-  const build = useCallback(async () => {
+  const build = useCallback(async (nextView: GraphView = view) => {
     setLoading(true)
     setToast(null)
     try {
-      const g = await api.graph(selected.map((p) => p.id))
+      const g = await api.graph(selected.map((p) => p.id), nextView)
       setGraph(g)
       setActiveNode(null)
       if (!g.nodes.length) {
@@ -94,34 +130,75 @@ export default function GraphWorkbench() {
     } finally {
       setLoading(false)
     }
-  }, [selected])
+  }, [selected, view])
 
   useEffect(() => {
     void build()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const allNodes = graph?.nodes ?? []
+  const allEdges = graph?.edges ?? []
+  /* The Prior / Derivative dual view: the same graph, filtered down to the
+     papers that play one of the two roles. */
+  const nodes = useMemo(() => {
+    if (roleView === 'prior') {
+      return allNodes.filter((n) => n.role === 'foundation' || n.role === 'core')
+    }
+    if (roleView === 'derivative') {
+      return allNodes.filter((n) => n.role === 'derivative')
+    }
+    return allNodes
+  }, [allNodes, roleView])
+  const visibleIds = useMemo(() => new Set(nodes.map((n) => n.paper_id)), [nodes])
+  const edges = useMemo(
+    () => allEdges.filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target)),
+    [allEdges, visibleIds],
+  )
+  const foundationCount = allNodes.filter((n) => n.role === 'foundation').length
+
   /* ------------------------------------------------------------- cytoscape */
   const elements = useMemo<ElementDefinition[]>(() => {
     if (!graph) return []
-    const maxPr = Math.max(...graph.nodes.map((n) => n.pagerank), 1e-9)
-    const els: ElementDefinition[] = graph.nodes.map((n) => ({
+    const maxPr = Math.max(...nodes.map((n) => n.pagerank), 1e-9)
+    const els: ElementDefinition[] = nodes.map((n) => ({
       data: {
         id: n.paper_id,
-        label: n.title.length > 38 ? `${n.title.slice(0, 38)}…` : n.title,
-        title: `${n.title}\nPageRank ${n.pagerank.toFixed(5)} · Betweenness ${n.betweenness.toFixed(4)}`,
+        label: (n.label || n.title).length > 38 ? `${(n.label || n.title).slice(0, 38)}…` : n.label || n.title,
+        title: `${n.label || n.title}\nPageRank ${n.pagerank.toFixed(5)} · Betweenness ${n.betweenness.toFixed(4)}`,
         role: n.role,
         size: 22 + 52 * (n.pagerank / maxPr),
         pagerank: n.pagerank,
       },
     }))
-    graph.edges.forEach((e, i) => {
+    edges.forEach((e, i) => {
+      const kind = e.kind || 'citation'
+      const stance = e.stance || 'mentioning'
+      const color =
+        kind === 'citation'
+          ? STANCE_COLOR[stance] ?? '#cfd9e4'
+          : EDGE_KIND_COLOR[kind] ?? '#8fa3b8'
       els.push({
-        data: { id: `e${i}`, source: e.source, target: e.target, relevance: e.relevance },
+        data: {
+          id: `e${i}`,
+          source: e.source,
+          target: e.target,
+          relevance: e.relevance,
+          context: e.context || '',
+          stance,
+          stanceLabel: e.stance_label || STANCE_LABEL[stance] || '提及',
+          stanceReason: e.stance_reason || '',
+          kind,
+          kindLabel: e.label || VIEW_LABEL[(kind as GraphView)] || '引用',
+          weight: e.weight ?? 1,
+          sharedCiting: e.shared_citing_papers || [],
+          sharedRefs: e.shared_references || [],
+          color,
+        },
       })
     })
     return els
-  }, [graph])
+  }, [graph, nodes, edges])
 
   const stylesheet = useMemo<StylesheetStyle[]>(
     () => [
@@ -164,12 +241,27 @@ export default function GraphWorkbench() {
         selector: 'edge',
         style: {
           width: 'mapData(relevance, 0, 1, 0.6, 2.6)',
-          'line-color': '#cfd9e4',
-          'target-arrow-color': '#a8b8ca',
+          'line-color': 'data(color)',
+          'target-arrow-color': 'data(color)',
           'target-arrow-shape': 'triangle',
           'curve-style': 'bezier',
           opacity: 0.75,
         },
+      },
+      {
+        /* The similarity edges are not citations: they are undirected. */
+        selector: 'edge[kind = "co_citation"], edge[kind = "co_reference"]',
+        style: {
+          'target-arrow-shape': 'none',
+          'line-style': 'dashed',
+          'line-dash-pattern': [4, 3],
+          width: 'mapData(weight, 1, 6, 1.2, 3.4)',
+          opacity: 0.85,
+        },
+      },
+      {
+        selector: 'edge:selected',
+        style: { width: 4, opacity: 1, 'line-color': '#dd6702', 'target-arrow-color': '#dd6702' },
       },
     ],
     [],
@@ -205,6 +297,21 @@ export default function GraphWorkbench() {
       const id = evt.target.id()
       const node = graph.nodes.find((n) => n.paper_id === id)
       setActiveNode(node ?? null)
+      setActiveEdge(null)
+    })
+
+    // Clicking an edge shows the sentence that contains the citation, so the
+    // reviewer can read *why* one paper points at another instead of trusting
+    // an edge weight.
+    cy.on('tap', 'edge', (evt) => {
+      const id = evt.target.id()
+      const idx = Number(id.replace(/^e/, ''))
+      setActiveEdge(graph.edges[idx] ?? null)
+      setActiveNode(null)
+    })
+
+    cy.on('tap', (evt) => {
+      if (evt.target === cy) setActiveEdge(null)
     })
 
     return () => {
@@ -240,6 +347,19 @@ export default function GraphWorkbench() {
     }
   }
 
+  const runConflicts = async () => {
+    setBusyPanel('conflicts')
+    setToast(null)
+    try {
+      const r = await api.contradictions(selected.map((p) => p.id))
+      setConflicts(r)
+    } catch (e) {
+      setToast(`矛盾检测失败：${(e as Error).message}`)
+    } finally {
+      setBusyPanel(null)
+    }
+  }
+
   const runQuality = async () => {
     const paperId = qualityPaper || selected[0]?.id
     if (!paperId) {
@@ -257,10 +377,6 @@ export default function GraphWorkbench() {
       setBusyPanel(null)
     }
   }
-
-  const nodes = graph?.nodes ?? []
-  const edges = graph?.edges ?? []
-  const foundationCount = nodes.filter((n) => n.role === 'foundation').length
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -281,9 +397,10 @@ export default function GraphWorkbench() {
               { id: 'review', label: '自动综述' },
               { id: 'future', label: 'Future Work' },
               { id: 'quality', label: '引用质量' },
+              { id: 'conflicts', label: '矛盾检测' },
             ]}
           />
-          <button className="btn-primary" onClick={build} disabled={loading}>
+          <button className="btn-primary" onClick={() => void build()} disabled={loading}>
             {loading ? <Spinner className="h-3.5 w-3.5" /> : '⟳'} 重建图谱
           </button>
         </div>
@@ -306,7 +423,55 @@ export default function GraphWorkbench() {
 
       <div className="flex-1 overflow-hidden px-6 py-4">
         {panel === 'graph' && (
-          <div className="flex h-full gap-4">
+          <div className="flex h-full flex-col gap-3">
+            {/* ------------------------------------------- view switchers */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1 rounded-md border border-ink-200 p-0.5 dark:border-ink-700">
+                <span className="px-1.5 font-sans text-[10px] text-ink-400">边视图</span>
+                {(Object.keys(VIEW_LABEL) as GraphView[]).map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => {
+                      setView(v)
+                      void build(v)
+                    }}
+                    className={`rounded px-2 py-0.5 font-sans text-[11px] transition-colors ${
+                      view === v
+                        ? 'bg-accent-500 text-white'
+                        : 'text-ink-500 hover:bg-ink-100 dark:text-ink-300 dark:hover:bg-ink-800'
+                    }`}
+                  >
+                    {VIEW_LABEL[v]}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-1 rounded-md border border-ink-200 p-0.5 dark:border-ink-700">
+                <span className="px-1.5 font-sans text-[10px] text-ink-400">节点视图</span>
+                {(
+                  [
+                    { id: 'all', label: '全部' },
+                    { id: 'prior', label: '前作 / 基石' },
+                    { id: 'derivative', label: '衍生' },
+                  ] as { id: RoleView; label: string }[]
+                ).map((r) => (
+                  <button
+                    key={r.id}
+                    onClick={() => setRoleView(r.id)}
+                    className={`rounded px-2 py-0.5 font-sans text-[11px] transition-colors ${
+                      roleView === r.id
+                        ? 'bg-accent-500 text-white'
+                        : 'text-ink-500 hover:bg-ink-100 dark:text-ink-300 dark:hover:bg-ink-800'
+                    }`}
+                  >
+                    {r.label}
+                  </button>
+                ))}
+              </div>
+              <span className="font-sans text-[10.5px] text-ink-400">
+                共引 = 被同一篇论文引用；共参考 = 引用同一篇参考文献
+              </span>
+            </div>
+            <div className="flex min-h-0 flex-1 gap-4">
             {/* ------------------------------------------------------ canvas */}
             <div className="panel relative min-w-0 flex-1 overflow-hidden">
               {nodes.length === 0 ? (
@@ -349,11 +514,127 @@ export default function GraphWorkbench() {
                 <span className="font-sans text-[10px] text-ink-400">点击节点查看详情</span>
               </div>
               <div className="scroll-thin flex-1 overflow-y-auto">
-                {activeNode ? (
+                {activeEdge ? (
+                  <div className="space-y-3 p-3">
+                    {activeEdge.kind && activeEdge.kind !== 'citation' ? (
+                      /* A similarity edge: the two papers are related, not citing. */
+                      <>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-serif text-[13px] font-semibold leading-snug">
+                            {activeEdge.kind === 'co_citation' ? '共同被引' : '共同参考'}
+                          </span>
+                          <span
+                            className="chip shrink-0"
+                            style={{
+                              borderColor: EDGE_KIND_COLOR[activeEdge.kind] ?? '#2f7f79',
+                              color: EDGE_KIND_COLOR[activeEdge.kind] ?? '#2f7f79',
+                            }}
+                          >
+                            {activeEdge.label || (activeEdge.kind === 'co_citation' ? '共引' : '共参考')}
+                            {' · '}
+                            {activeEdge.weight ?? 1}
+                          </span>
+                        </div>
+                        <div className="flex items-start gap-1.5 text-[11px] leading-snug text-ink-500 dark:text-ink-400">
+                          <span className="flex-1 break-words">
+                            {nodes.find((n) => n.paper_id === activeEdge.source)?.label ?? '论文 A'}
+                          </span>
+                          <span aria-hidden className="pt-0.5">↔</span>
+                          <span className="flex-1 break-words">
+                            {nodes.find((n) => n.paper_id === activeEdge.target)?.label ?? '论文 B'}
+                          </span>
+                        </div>
+                        {activeEdge.shared_citing_papers && activeEdge.shared_citing_papers.length > 0 && (
+                          <div>
+                            <div className="font-sans text-[10px] text-ink-400">
+                              被同一篇论文引用：
+                            </div>
+                            <ul className="mt-0.5 space-y-0.5">
+                              {activeEdge.shared_citing_papers.map((t, i) => (
+                                <li key={i} className="font-sans text-[10.5px] leading-snug text-ink-600 dark:text-ink-300">
+                                  · {t}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {activeEdge.shared_references && activeEdge.shared_references.length > 0 && (
+                          <div>
+                            <div className="font-sans text-[10px] text-ink-400">
+                              共同引用的参考文献：
+                            </div>
+                            <ul className="mt-0.5 space-y-0.5">
+                              {activeEdge.shared_references.map((t, i) => (
+                                <li key={i} className="font-sans text-[10.5px] leading-snug text-ink-600 dark:text-ink-300">
+                                  · {t}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        <div className="font-sans text-[10px] text-ink-400">
+                          相似边来自共引 / 共参考统计，不表示直接的引用关系。
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-serif text-[13px] font-semibold leading-snug">
+                            引用原句
+                          </span>
+                          <span
+                            className="chip shrink-0"
+                            style={{
+                              borderColor: STANCE_COLOR[activeEdge.stance] ?? '#a8b8ca',
+                              color: STANCE_COLOR[activeEdge.stance] ?? '#a8b8ca',
+                            }}
+                          >
+                            {activeEdge.stance_label || STANCE_LABEL[activeEdge.stance] || '提及'}
+                          </span>
+                        </div>
+                        {activeEdge.stance_reason && (
+                          <div className="font-sans text-[10px] leading-snug text-ink-400">
+                            判定依据：{activeEdge.stance_reason}
+                          </div>
+                        )}
+                        <div className="flex items-start gap-1.5 text-[11px] leading-snug text-ink-500 dark:text-ink-400">
+                          <span className="flex-1 break-words">
+                            {nodes.find((n) => n.paper_id === activeEdge.source)?.label ?? '引用方'}
+                          </span>
+                          <span aria-hidden className="pt-0.5">→</span>
+                          <span className="flex-1 break-words">
+                            {nodes.find((n) => n.paper_id === activeEdge.target)?.label ?? '被引方'}
+                          </span>
+                        </div>
+                        <div
+                          className="rounded-md border-l-2 bg-ink-50 px-3 py-2 text-[11.5px] leading-relaxed text-ink-700 dark:bg-ink-800 dark:text-parchment-200"
+                          style={{ borderLeftColor: '#dd6702' }}
+                        >
+                          {activeEdge.context?.trim() ? (
+                            <>“{activeEdge.context.trim()}”</>
+                          ) : (
+                            <span className="text-ink-400">
+                              未能在正文中定位到该引用的原句（扫描件可能未被 OCR 识别出引用标记）。
+                            </span>
+                          )}
+                        </div>
+                        <div className="font-sans text-[10px] text-ink-400">
+                          相关度 {activeEdge.relevance.toFixed(2)}
+                        </div>
+                      </>
+                    )}
+                    <button
+                      className="btn-secondary w-full !text-[11px]"
+                      onClick={() => navigate(`/reader/${activeEdge.source}`)}
+                    >
+                      在阅读器中打开引用方
+                    </button>
+                  </div>
+                ) : activeNode ? (
                   <div className="space-y-3 p-3">
                     <div>
                       <div className="font-serif text-[13px] font-semibold leading-snug">
-                        {activeNode.title}
+                        {activeNode.label || activeNode.title}
                       </div>
                       <div className="mt-1 flex items-center gap-1.5">
                         <span
@@ -427,7 +708,7 @@ export default function GraphWorkbench() {
                                   style={{ background: ROLE_COLOR[n.role] }}
                                 />
                                 <span className="line-clamp-2 text-ink-600 dark:text-ink-300">
-                                  {n.title}
+                                  {n.label || n.title}
                                 </span>
                               </div>
                             </td>
@@ -446,6 +727,7 @@ export default function GraphWorkbench() {
                   </table>
                 )}
               </div>
+            </div>
             </div>
           </div>
         )}
@@ -608,7 +890,7 @@ export default function GraphWorkbench() {
                             {s.text}
                           </div>
                           <div className="mt-0.5 font-sans text-[10px] text-ink-400">
-                            — {s.paper_title} · p.{s.page_no}
+                            — {s.paper_title}{s.page_no ? ` · p.${s.page_no}` : ''}
                           </div>
                         </div>
                       ))}
@@ -647,7 +929,7 @@ export default function GraphWorkbench() {
                 />
               ) : (
                 <>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                     <StatCard label="实质性引用" value={quality.kept_count} tone="accent" />
                     <StatCard label="装饰性引用" value={quality.dropped_count} />
                     <StatCard
@@ -656,6 +938,16 @@ export default function GraphWorkbench() {
                         (quality.kept_count / Math.max(1, quality.kept_count + quality.dropped_count)) * 100,
                       )}%`}
                     />
+                    <StatCard
+                      label="支持 / 对照 / 提及"
+                      value={
+                        quality.stance_counts
+                          ? `${quality.stance_counts.supporting ?? 0} / ${
+                              quality.stance_counts.contrasting ?? 0
+                            } / ${quality.stance_counts.mentioning ?? 0}`
+                          : '—'
+                      }
+                    />
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
                     <section>
@@ -663,12 +955,38 @@ export default function GraphWorkbench() {
                       <div className="space-y-1.5">
                         {quality.kept.map((r, i) => (
                           <div key={i} className="rounded-md border border-ink-200 px-2.5 py-1.5 dark:border-ink-700">
-                            <div className="font-sans text-[11.5px] font-medium text-ink-700 dark:text-parchment-200">
-                              {r.title}
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="font-sans text-[11.5px] font-medium text-ink-700 dark:text-parchment-200">
+                                {r.title}
+                              </span>
+                              {r.stance && (
+                                <span
+                                  className="chip shrink-0"
+                                  style={{
+                                    borderColor: STANCE_COLOR[r.stance] ?? '#a8b8ca',
+                                    color: STANCE_COLOR[r.stance] ?? '#a8b8ca',
+                                  }}
+                                >
+                                  {r.stance_label || STANCE_LABEL[r.stance]}
+                                </span>
+                              )}
                             </div>
                             <div className="font-sans text-[10px] text-ink-400">
                               {r.authors?.slice(0, 3).join(', ')} {r.year ? `· ${r.year}` : ''}
                             </div>
+                            {r.context && (
+                              <details className="mt-1">
+                                <summary className="cursor-pointer font-sans text-[10px] text-ink-400">
+                                  查看引用原句
+                                </summary>
+                                <div
+                                  className="mt-1 border-l-2 bg-ink-50 px-2 py-1 font-sans text-[10.5px] leading-relaxed text-ink-600 dark:bg-ink-800 dark:text-ink-300"
+                                  style={{ borderLeftColor: '#dd6702' }}
+                                >
+                                  “{r.context.trim()}”
+                                </div>
+                              </details>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -677,14 +995,110 @@ export default function GraphWorkbench() {
                       <h3 className="panel-title mb-1.5">装饰性引用（顺带提及）</h3>
                       <div className="space-y-1.5">
                         {quality.dropped.map((r, i) => (
-                          <div key={i} className="rounded-md border border-ink-200 px-2.5 py-1.5 opacity-70 dark:border-ink-700">
-                            <div className="font-sans text-[11.5px] text-ink-600 dark:text-ink-300">{r.title}</div>
+                          <div key={i} className="rounded-md border border-ink-200 px-2.5 py-1.5 opacity-80 dark:border-ink-700">
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="font-sans text-[11.5px] text-ink-600 dark:text-ink-300">{r.title}</span>
+                              {r.stance && (
+                                <span
+                                  className="chip shrink-0"
+                                  style={{
+                                    borderColor: STANCE_COLOR[r.stance] ?? '#a8b8ca',
+                                    color: STANCE_COLOR[r.stance] ?? '#a8b8ca',
+                                  }}
+                                >
+                                  {r.stance_label || STANCE_LABEL[r.stance]}
+                                </span>
+                              )}
+                            </div>
                             <div className="font-sans text-[10px] text-ink-400">{r.authors?.slice(0, 3).join(', ')}</div>
+                            {r.context && (
+                              <details className="mt-1">
+                                <summary className="cursor-pointer font-sans text-[10px] text-ink-400">
+                                  查看引用原句
+                                </summary>
+                                <div
+                                  className="mt-1 border-l-2 bg-ink-50 px-2 py-1 font-sans text-[10.5px] leading-relaxed text-ink-600 dark:bg-ink-800 dark:text-ink-300"
+                                  style={{ borderLeftColor: '#dd6702' }}
+                                >
+                                  “{r.context.trim()}”
+                                </div>
+                              </details>
+                            )}
                           </div>
                         ))}
                       </div>
                     </section>
                   </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {panel === 'conflicts' && (
+          <div className="panel h-full overflow-y-auto p-5">
+            <div className="mx-auto max-w-3xl space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <button className="btn-primary" onClick={runConflicts} disabled={busyPanel === 'conflicts'}>
+                  {busyPanel === 'conflicts' ? <Spinner className="h-3.5 w-3.5" /> : null} 扫描矛盾
+                </button>
+                <span className="font-sans text-[10.5px] text-ink-400">
+                  规则化检测：同一指标、同一上下文、不同取值 → 数值冲突；同一主语、相反结论 → 结论冲突
+                </span>
+              </div>
+
+              {!conflicts ? (
+                <EmptyState
+                  title="尚未扫描"
+                  hint="矛盾检测会扫描文献库的全部文本块，找出两处互相冲突的陈述，并把双方原句一并给出——这是单纯「检索 + 摘要」做不到的。"
+                />
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                    <StatCard label="矛盾总数" value={conflicts.count} tone="accent" />
+                    <StatCard label="数值冲突" value={conflicts.numeric_count} />
+                    <StatCard label="结论冲突" value={conflicts.claim_count} />
+                    <StatCard label="扫描文本块" value={conflicts.scanned_chunks} />
+                  </div>
+
+                  {conflicts.count === 0 ? (
+                    <EmptyState
+                      title="未检出矛盾"
+                      hint="当前文献库中没有同一指标的相互冲突取值，也没有相反的结论。"
+                    />
+                  ) : (
+                    <div className="space-y-3">
+                      {conflicts.conflicts.map((c, i) => (
+                        <div key={i} className="rounded-md border border-ink-200 p-3 dark:border-ink-700">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="font-serif text-[13px] font-semibold">{c.summary}</span>
+                            <span className="chip" style={{ borderColor: '#dd6702', color: '#dd6702' }}>
+                              {c.kind === 'numeric' ? '数值冲突' : '结论冲突'} · {Math.round(c.confidence * 100)}%
+                            </span>
+                          </div>
+                          <div className="mt-1 font-sans text-[10px] text-ink-400">判定依据：{c.reason}</div>
+                          <div className="mt-2 grid gap-2 md:grid-cols-2">
+                            {[c.left, c.right].map((side, k) => (
+                              <div
+                                key={k}
+                                className="border-l-2 bg-ink-50 px-2 py-1.5 dark:bg-ink-800"
+                                style={{ borderLeftColor: k === 0 ? '#dd6702' : '#2f7f79' }}
+                              >
+                                <div className="font-sans text-[10px] text-ink-400">
+                                  {side.paper_title}
+                                  {side.page_no ? ` · p.${side.page_no}` : ''}
+                                  {side.value ? ` · ${side.metric} = ${side.value}${side.unit || ''}` : ''}
+                                </div>
+                                <div className="mt-0.5 font-sans text-[10.5px] leading-relaxed text-ink-600 dark:text-ink-300">
+                                  “{side.text}”
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </>
               )}
             </div>

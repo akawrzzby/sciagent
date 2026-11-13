@@ -29,6 +29,11 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+# The three edge views of the graph workbench.
+EDGE_KIND_CITATION = "citation"
+EDGE_KIND_CO_CITATION = "co_citation"
+EDGE_KIND_CO_REFERENCE = "co_reference"
+
 # Weights of the foundation score.
 W_PAGERANK = 0.35
 W_BETWEENNESS = 0.25
@@ -55,8 +60,11 @@ class GraphNode:
 
     paper_id: str
     title: str = ""
+    label: str = ""            # display label, tells versions of a paper apart
     year: int | None = None
     arxiv_id: str = ""
+    version_label: str = ""
+    is_scanned: bool = False
     in_degree: int = 0
     out_degree: int = 0
     pagerank: float = 0.0
@@ -72,8 +80,11 @@ class GraphNode:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "paper_id": self.paper_id, "title": self.title, "year": self.year,
-            "arxiv_id": self.arxiv_id, "in_degree": self.in_degree,
+            "paper_id": self.paper_id, "title": self.title,
+            "label": self.label or self.title, "year": self.year,
+            "arxiv_id": self.arxiv_id, "version_label": self.version_label,
+            "is_scanned": self.is_scanned,
+            "in_degree": self.in_degree,
             "out_degree": self.out_degree, "pagerank": round(self.pagerank, 6),
             "betweenness": round(self.betweenness, 6), "k_core": self.k_core,
             "hub_score": round(self.hub_score, 6),
@@ -169,6 +180,23 @@ def align_reference(
     return None
 
 
+def _display_label(title: str, version_label: str, is_scanned: bool) -> str:
+    """A label that tells two versions of the same paper apart.
+
+    The organiser's test set deliberately contains the same paper in several
+    versions (and once as a pure scan), so without this the graph would show
+    three nodes carrying exactly the same title.
+    """
+    suffix: list[str] = []
+    if version_label:
+        suffix.append(version_label)
+    if is_scanned:
+        suffix.append("扫描件")
+    if not suffix:
+        return title
+    return f"{title}（{' · '.join(suffix)}）"
+
+
 def build_graph(
     papers: Sequence[dict[str, Any]],
     references_by_paper: dict[str, list[dict[str, Any]]],
@@ -201,9 +229,14 @@ def build_graph(
             edges.append({
                 "source": src_id,
                 "target": dst_id,
+                "kind": EDGE_KIND_CITATION,
+                "weight": 1,
                 "relevance": round(relevance, 3),
                 "context": (ref.get("context") or "")[:400],
                 "reference_index": ref.get("index_in_doc", 0),
+                "stance": ref.get("stance", CITATION_STANCE_MENTIONING),
+                "stance_label": ref.get("stance_label", "提及"),
+                "stance_reason": ref.get("stance_reason", ""),
             })
 
     # De-duplicate (keep the strongest relevance per pair).
@@ -253,8 +286,13 @@ def build_graph(
         nodes.append(GraphNode(
             paper_id=pid,
             title=meta.get("title", G.nodes[pid].get("title", "")),
+            label=_display_label(meta.get("title", ""),
+                                 meta.get("version_label", ""),
+                                 bool(meta.get("is_scanned"))),
             year=meta.get("year"),
             arxiv_id=meta.get("arxiv_id", ""),
+            version_label=meta.get("version_label", ""),
+            is_scanned=bool(meta.get("is_scanned")),
             in_degree=G.in_degree(pid),
             out_degree=G.out_degree(pid),
             pagerank=pagerank.get(pid, 0.0),
@@ -293,6 +331,199 @@ def build_graph(
         "algorithms": ["PageRank", "Betweenness Centrality", "k-core", "HITS"],
     }
     return graph
+
+
+# --------------------------------------------------------------------------- similarity
+def build_similarity_edges(
+    papers: Sequence[dict[str, Any]],
+    references_by_paper: dict[str, list[dict[str, Any]]],
+    citation_edges: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Co-citation and co-reference edges between the papers of the library.
+
+    Two papers that are cited by the same paper (*co-citation*) or that cite
+    the same paper (*co-reference*, a.k.a. bibliographic coupling) belong to
+    the same line of work.  Connected Papers builds its similarity graph from
+    exactly these two relations, and it is what makes a small library look
+    like a field instead of a list of papers.
+
+    The shared items are kept on the edge, so the UI can answer "why are
+    these two connected?".
+    """
+    by_id = {p["paper_id"]: p for p in papers}
+    titles = {pid: by_id[pid].get("title", "") for pid in by_id}
+
+    # --- co-citation: who is cited by the same paper ----------------------
+    cited_by: dict[str, set[str]] = {}
+    for edge in citation_edges:
+        src, dst = edge.get("source"), edge.get("target")
+        if not src or not dst or src == dst:
+            continue
+        cited_by.setdefault(src, set()).add(dst)
+
+    co_citation: dict[tuple[str, str], set[str]] = {}
+    for citing, cited in cited_by.items():
+        ordered = sorted(cited)
+        for i in range(len(ordered)):
+            for j in range(i + 1, len(ordered)):
+                key = (ordered[i], ordered[j])
+                co_citation.setdefault(key, set()).add(citing)
+
+    # --- co-reference: who cites the same reference -----------------------
+    citing_shared: dict[str, set[str]] = {}
+    for src, refs in references_by_paper.items():
+        if src not in by_id:
+            continue
+        for ref in refs:
+            title = _norm_title(ref.get("title", ""))
+            if not title:
+                continue
+            citing_shared.setdefault(title, set()).add(src)
+
+    co_reference: dict[tuple[str, str], set[str]] = {}
+    shared_titles: dict[tuple[str, str], list[str]] = {}
+    for title, citers in citing_shared.items():
+        if len(citers) < 2:
+            continue
+        ordered = sorted(citers)
+        for i in range(len(ordered)):
+            for j in range(i + 1, len(ordered)):
+                key = (ordered[i], ordered[j])
+                co_reference.setdefault(key, set()).add(title)
+                shared_titles.setdefault(key, []).append(title)
+
+    out: list[dict[str, Any]] = []
+
+    for (a, b), citers in co_citation.items():
+        out.append({
+            "source": a,
+            "target": b,
+            "kind": EDGE_KIND_CO_CITATION,
+            "weight": len(citers),
+            "relevance": 1.0,
+            "context": "",
+            "shared_citing_papers": [titles.get(c, c) for c in sorted(citers)],
+            "label": "共引",
+        })
+
+    for (a, b), titles_shared in co_reference.items():
+        names = sorted(titles_shared)
+        out.append({
+            "source": a,
+            "target": b,
+            "kind": EDGE_KIND_CO_REFERENCE,
+            "weight": len(names),
+            "relevance": 1.0,
+            "context": "",
+            "shared_references": names[:8],
+            "label": "共参考",
+        })
+
+    out.sort(key=lambda e: (-e["weight"], e["source"], e["target"]))
+    return out
+
+
+def filter_edges_by_view(edges: Sequence[dict[str, Any]], view: str) -> list[dict[str, Any]]:
+    """Keep the edges that belong to one of the graph views."""
+    view = (view or EDGE_KIND_CITATION).strip().lower()
+    if view in ("all", "全部"):
+        return list(edges)
+    if view in ("co_citation", "co-citation", "共引"):
+        kinds = {EDGE_KIND_CO_CITATION}
+    elif view in ("co_reference", "co-reference", "共参考"):
+        kinds = {EDGE_KIND_CO_REFERENCE}
+    else:
+        kinds = {EDGE_KIND_CITATION}
+    return [e for e in edges if e.get("kind", EDGE_KIND_CITATION) in kinds]
+
+
+# Citation *stance* labels, following the taxonomy of Smart Citations
+# (Nicholson et al., 2021): a citation either supports, contrasts, or merely
+# mentions the cited work.  The labels come from explicit discourse markers
+# rather than from a trained classifier, so every decision can be explained to
+# a reviewer -- which matters more here than raw accuracy.
+CITATION_STANCE_SUPPORTING = "supporting"
+CITATION_STANCE_CONTRASTING = "contrasting"
+CITATION_STANCE_MENTIONING = "mentioning"
+
+CITATION_STANCE_LABEL = {
+    CITATION_STANCE_SUPPORTING: "支持",
+    CITATION_STANCE_CONTRASTING: "对照",
+    CITATION_STANCE_MENTIONING: "提及",
+}
+
+_CONTRAST_MARKERS = re.compile(
+    r"\b(?:however|in contrast|contrary to|unlike|whereas|but|"
+    r"differs? from|differ from|disagrees?|contradicts?|inconsistent|"
+    r"despite|rather than|on the other hand|nevertheless|nonetheless|"
+    r"deviates?|contrary)\b",
+    re.IGNORECASE,
+)
+
+_SUPPORT_MARKERS = re.compile(
+    r"\b(?:shows?|showed|shown|demonstrates?|demonstrated|proves?|proved|"
+    r"establish(?:es|ed)?|confirms?|confirmed|reports?|reported|finds?|"
+    r"follow(?:s|ing)?|building on|builds on|extends?|extended|"
+    r"based on|according to|consistent with|in line with|adopts?|adopted|"
+    r"we follow|we use|we employ|introduced|proposed|presented)\b",
+    re.IGNORECASE,
+)
+
+
+@dataclass
+class CitationStance:
+    """The stance a citing paper takes towards the cited work."""
+
+    stance: str = CITATION_STANCE_MENTIONING
+    confidence: float = 0.0
+    reason: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"stance": self.stance, "label": CITATION_STANCE_LABEL.get(self.stance, ""),
+                "confidence": self.confidence, "reason": self.reason}
+
+
+def classify_citation_context(context: str, target_title: str) -> CitationStance:
+    """Classify how the citing sentence relates to the cited work.
+
+    Three labels: ``supporting`` (the cited work backs the claim), ``contrasting``
+    (the cited work is used against or compared to another line of work) and
+    ``mentioning`` (the work is only listed).  Every decision carries the
+    marker that produced it, so the UI can show *why* a citation was labelled
+    the way it was.
+    """
+    text = (context or "").strip()
+    if not text:
+        return CitationStance(CITATION_STANCE_MENTIONING, 0.0, "未能在正文中定位到引用句")
+
+    contrast = _CONTRAST_MARKERS.search(text)
+    support = _SUPPORT_MARKERS.search(text)
+
+    ctx_tokens = set(re.findall(r"[a-z]{4,}", text.lower()))
+    title_tokens = set(re.findall(r"[a-z]{4,}", (target_title or "").lower()))
+    overlap = (len(ctx_tokens & title_tokens) / len(title_tokens)) if title_tokens else 0.0
+
+    # A contrastive marker wins: "however, [12] showed ..." is a contrast even
+    # though the cited work supplies the evidence.
+    if contrast:
+        conf = 0.55 + (0.25 if overlap > 0.15 else 0.0) + (0.1 if support else 0.0)
+        return CitationStance(
+            CITATION_STANCE_CONTRASTING, round(min(0.95, conf), 2),
+            f"检出对比性表述「{contrast.group(0)}」")
+    if support and overlap > 0.10:
+        conf = 0.50 + min(0.35, overlap) + (0.10 if re.search(r"\d", text) else 0.0)
+        return CitationStance(
+            CITATION_STANCE_SUPPORTING, round(min(0.95, conf), 2),
+            f"检出支持性表述「{support.group(0)}」且与被引主题相关")
+    if support:
+        return CitationStance(
+            CITATION_STANCE_SUPPORTING, 0.55,
+            f"检出支持性表述「{support.group(0)}」")
+    if overlap > 0.25:
+        return CitationStance(
+            CITATION_STANCE_MENTIONING, round(min(0.80, 0.40 + overlap), 2),
+            "与被引主题有词汇关联，但无明确立场信号")
+    return CitationStance(CITATION_STANCE_MENTIONING, 0.60, "仅顺带提及")
 
 
 def compute_citation_relevance(context: str, target_title: str) -> float:
