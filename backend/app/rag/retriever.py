@@ -15,7 +15,7 @@ import numpy as np
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.rag import sparse
+from app.rag import meta_aware, sparse
 from app.rag.embeddings import VectorStore, get_embedding_service
 
 logger = get_logger(__name__)
@@ -39,6 +39,8 @@ class Passage:
     dense_rank: int = 0
     rerank_score: float = 0.0
     paper_title: str = ""
+    metadata_affinity: float = 0.0
+    metadata_match: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -56,6 +58,8 @@ class Passage:
             "sparse_rank": self.sparse_rank,
             "dense_rank": self.dense_rank,
             "rerank_score": round(self.rerank_score, 6),
+            "metadata_affinity": round(self.metadata_affinity, 4),
+            "metadata_match": self.metadata_match,
         }
 
     def citation(self, index: int) -> dict[str, Any]:
@@ -71,6 +75,7 @@ class Passage:
             "char_end": self.char_end,
             "quote": self.content[:320],
             "score": round(self.score, 6),
+            "metadata_affinity": round(self.metadata_affinity, 4),
         }
 
 
@@ -194,8 +199,17 @@ class HybridRetriever:
         passages: list[Passage] = []
         rerank_scores: list[float] = []
         if rerank and dense_ranking:
+            # The cross-encoder sees the same metadata conditioned text as the
+            # dense channel.  Without the prefix the last ranking step would
+            # throw the metadata away again: a query that names a paper would
+            # still be answered by whichever paper happens to share the
+            # wording.
+            if getattr(settings, "metadata_aware_rerank", True):
+                rerank_docs = [meta_aware.embedding_text(c) for c in candidates]
+            else:
+                rerank_docs = [c["content"] for c in candidates]
             rerank_scores = await asyncio.to_thread(
-                self.embeddings.rerank, query, [c["content"] for c in candidates]
+                self.embeddings.rerank, query, rerank_docs,
             )
         if rerank_scores:
             for chunk, rs in zip(candidates, rerank_scores):
@@ -212,6 +226,26 @@ class HybridRetriever:
             wanted = set(kinds)
             passages = [p for p in passages if p.kind in wanted]
 
+        # ---- metadata aware boost ------------------------------------------
+        # A query that names the paper ("what did Vaswani report in 2017")
+        # lifts that paper's passages; a query that names nothing lifts
+        # nothing.  The affinity is reported so that the UI can explain the
+        # retrieval.
+        affinity = self._metadata_affinity(query, chunks)
+        boost = float(getattr(settings, "metadata_boost", 0.0) or 0.0)
+        if affinity and boost > 0:
+            for p in passages:
+                info = affinity.get(p.paper_id) or {}
+                p.metadata_affinity = float(info.get("affinity", 0.0))
+                p.metadata_match = info
+                p.score = p.score * (1.0 + boost * p.metadata_affinity)
+            passages.sort(key=lambda p: -p.score)
+            diagnostics["metadata_boost"] = {
+                "weight": boost,
+                "matched_papers": [pid for pid, info in affinity.items()
+                                   if info.get("affinity", 0) > 0],
+            }
+
         passages = passages[:top_k]
         for p in passages:
             p.sparse_rank = sparse_rank.get(p.chunk_id, 0)
@@ -222,6 +256,23 @@ class HybridRetriever:
                                diagnostics=diagnostics)
 
     # ------------------------------------------------------------------ helpers
+    @staticmethod
+    def _metadata_affinity(query: str,
+                            chunks: Sequence[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        """How well the metadata of every paper in the pool matches the query."""
+        out: dict[str, dict[str, Any]] = {}
+        for c in chunks:
+            pid = c.get("paper_id", "")
+            if not pid or pid in out:
+                continue
+            out[pid] = meta_aware.explain_affinity(
+                query,
+                c.get("paper_title", "") or "",
+                c.get("paper_authors"),
+                c.get("paper_year"),
+            )
+        return out
+
     @staticmethod
     def _to_passage(chunk: dict[str, Any], *, score: float, rerank_score: float = 0.0) -> Passage:
         return Passage(
@@ -246,9 +297,17 @@ async def embed_chunks(
     service=None,
     batch_size: int = 8,
 ) -> np.ndarray | None:
-    """Embed a list of chunks (``{"content": str}``) into a dense matrix."""
+    """Embed a list of chunks (``{"content": str}``) into a dense matrix.
+
+    The embedded text carries the paper's title, authors and year in front of
+    the content, so that the vector is aware of the metadata the chunk came
+    from (see :mod:`app.rag.meta_aware`).
+    """
     service = service or get_embedding_service()
-    texts = [c.get("content", "") for c in chunks]
+    if getattr(get_settings(), "metadata_aware_embedding", True):
+        texts = [meta_aware.embedding_text(c) for c in chunks]
+    else:
+        texts = [c.get("content", "") for c in chunks]
     if not texts:
         return None
     vectors: list[np.ndarray] = []
