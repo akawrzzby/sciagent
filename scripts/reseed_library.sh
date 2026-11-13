@@ -9,6 +9,7 @@ set -uo pipefail
 
 BASE="${1:-http://127.0.0.1:9000}"
 DATA_DIR="${2:-$HOME/ra_testdata}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "==> current library"
 curl -s --max-time 30 "$BASE/api/papers" | grep -o '"id": *"[^"]*"' | sed 's/.*: *"//;s/"//' > /tmp/paper_ids.txt
@@ -26,3 +27,6 @@ fi
 echo "==> after wipe"
 curl -s --max-time 30 "$BASE/api/papers/stats"
 echo ""
+
+echo "==> re-seeding from $DATA_DIR"
+bash "$SCRIPT_DIR/seed_library.sh" "$BASE" "$DATA_DIR"

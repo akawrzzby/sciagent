@@ -16,3 +16,9 @@ log_summary.sh
 log_tail.sh
 status_all.sh
 tunnel_status.sh
+check_authors.py
+dump_metadata.py
+probe_author_band.py
+seed_one.sh
+probe_audit.py
+probe_thinking.py
