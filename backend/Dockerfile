@@ -7,6 +7,18 @@
 #
 FROM python:3.11-slim
 
+# ---------------------------------------------------------------------------
+# apt 镜像
+#
+# 官方 deb.debian.org 在境内只有约 350 KB/s，一个 26 MB 的包能卡住整个构建
+# （实测卡死 40 秒仍未下完）。清华镜像实测 7.5 MB/s，快 21 倍。
+# 这里把镜像做成可覆盖的参数：默认走国内镜像，境外网络用
+# --build-arg DEBIAN_MIRROR=... --build-arg DEBIAN_SECURITY_MIRROR=...
+# 覆盖回官方源即可。
+# ---------------------------------------------------------------------------
+ARG DEBIAN_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian
+ARG DEBIAN_SECURITY_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian-security
+
 # pip 走国内镜像：官方 PyPI 在境内经常超时，拉不动 torch/scikit-learn 这类大包
 ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
@@ -15,15 +27,33 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_INDEX_URL=${PIP_INDEX_URL}
 
-# build-essential : 少数依赖没有预编译 wheel 时需要本地编译 (Cython 等)
-# libgl1/libglib2.0-0 : matplotlib 运行时依赖 (import matplotlib.pyplot)
-# curl             : HEALTHCHECK 探针
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
+# 换源。基础镜像的源文件可能是 list 格式也可能是 deb822 格式，两个都处理。
+RUN set -eux; \
+    for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do \
+        [ -f "$f" ] || continue; \
+        sed -i \
+            -e "s|https\?://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+            -e "s|https\?://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
+            "$f"; \
+    done; \
+    rm -f /etc/apt/sources.list.d/*.bak; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
         libgl1 \
         libglib2.0-0 \
-        curl \
-    && rm -rf /var/lib/apt/lists/*
+        curl; \
+    rm -rf /var/lib/apt/lists/*
+
+# 编译工具链默认不装：requirements.txt 里的每个依赖在 linux/amd64 上都有
+# 预编译 wheel（numpy / scikit-learn / matplotlib / pymupdf / rapidfuzz …），
+# 实测不需要编译器即可全部装成功。装上 build-essential 会让镜像多约 570 MB、
+# 构建多花好几分钟。只有在你要加一个没有 wheel 的依赖时才打开它：
+#   docker build --build-arg INSTALL_BUILD_DEPS=true ./backend
+ARG INSTALL_BUILD_DEPS=false
+RUN if [ "${INSTALL_BUILD_DEPS}" = "true" ]; then \
+        apt-get update && apt-get install -y --no-install-recommends build-essential \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
 
 WORKDIR /app
 

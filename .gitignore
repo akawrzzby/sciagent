@@ -62,3 +62,15 @@ desktop.ini
 
 # ---- 部署产物 ----
 docker-compose.override.yml
+
+# ---- 一次性诊断脚本（读凭据 / 试 API，绝不入公开仓库）----
+scripts/probe_*.py
+scripts/push_workflow_via_api.py
+scripts/try_api_routes.py
+
+# ---- GitHub Actions 工作流 ----
+# 当前 GitHub PAT 缺 workflow scope，GitHub 会拒绝 workflow 路径的写操作
+# （git push 报 refusing to allow...without workflow scope，API 返回 404）。
+# 因此文件只留在本地；等 PAT 补上 scope 后删掉这两行即可入库。
+# 等价的可复现方案已在仓库内：scripts/ci_docker_test.sh
+.github/

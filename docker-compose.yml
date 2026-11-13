@@ -21,7 +21,16 @@ services:
       context: ./backend
       dockerfile: Dockerfile
       args:
+        # apt 镜像：官方 deb.debian.org 在境内只有约 350 KB/s，实测能把构建卡死；
+        # 清华镜像实测 7.5 MB/s。境外网络可改成
+        #   DEBIAN_MIRROR=https://deb.debian.org/debian
+        #   DEBIAN_SECURITY_MIRROR=https://deb.debian.org/debian-security
+        DEBIAN_MIRROR: ${DEBIAN_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}
+        DEBIAN_SECURITY_MIRROR: ${DEBIAN_SECURITY_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+        # 所有依赖都有预编译 wheel，默认不装编译工具链（省约 570 MB）。
+        # 需要装没有 wheel 的依赖时改成 true。
+        INSTALL_BUILD_DEPS: ${INSTALL_BUILD_DEPS:-false}
         # 需要稠密检索/重排时改成 true（会额外下载 CPU 版 torch，镜像约 +2GB）
         INSTALL_EMBEDDINGS: ${INSTALL_EMBEDDINGS:-false}
     image: sciagent-backend:latest
