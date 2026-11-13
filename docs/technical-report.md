@@ -798,7 +798,7 @@ latency_ms=213786  resp_len=0  reason_len=8000
 | T42 | 共有指标名不算共有上下文 | "人类 95.6% accuracy" vs "模型 97%-98% accuracy on NSP" 不判为矛盾 | ✓ 14 篇库 2 条误报 → 0 |
 | T43 | 排除指标名后真实冲突仍报出 | Attention 两版本 BLEU 41.0 vs 41.8 仍被判为矛盾 | ✓ |
 
-**自动化测试结果**：`backend/tests/` 下 **14 个测试文件、176 个用例，全部通过（176 passed in 31.5s）**，在无网络、无 LLM 的环境下可完整运行。依赖真实 PDF 的用例检测到本地文件时自动运行，否则 `skip`；依赖本地权重的稠密/重排用例检测到模型目录时自动运行。
+**自动化测试结果**：`backend/tests/` 下 **14 个测试文件、178 个用例，全部通过（178 passed in 30.3s）**，在无网络、无 LLM 的环境下可完整运行。依赖真实 PDF 的用例检测到本地文件时自动运行，否则 `skip`；依赖本地权重的稠密/重排用例检测到模型目录时自动运行。
 
 > **一条值得强调的回归**：测试套件里有一个用例断言"表格被正确提取（≥3 张）"。它在把表格提取移入线程池之后**失败**了——这正是它存在的价值。该用例把一个只在端到端写入路径上暴露、且**静默丢数据**（不报错，只是表格变少）的缺陷挡在了回归之前。详见 §4.9。
 
@@ -936,12 +936,6 @@ What did Vaswani et al. report in 2017?
 
 > 诚实说明这次 A/B 的边界：14 条查询、单一数据集（14 篇库）、单次运行，没有做统计显著性检验。它能支撑的是"元数据通道解决了正文无法覆盖的那一类问题"这个**定性结论**，不足以支撑"元数据感知检索在任意规模下都带来 X% 的提升"这种**定量结论**。
 
-#### 6.3.5 对照问题：库外问题必须暴露
-
-#### 6.3.6 检索链路的 A/B
-
-元数据感知检索（§4.5）不是口头声称的：`METADATA_AWARE_EMBEDDING` / `METADATA_AWARE_RERANK` / `METADATA_BOOST` 三个开关让整条链路可以被关掉，其中编码开关需要**重建向量索引**才能真正生效。A/B 用同一组 14 条查询、同一套 top-5 判定。
-
 ### 6.4 扫描件（纯图片 PDF）实测
 
 `1706.03762v1_img.pdf` 是同一篇论文的**纯扫描件**：文本层字符数为 0。
@@ -973,7 +967,7 @@ What did Vaswani et al. report in 2017?
 | cloudflared 二进制下载 | 40.3 MB / 约 2 min | GitHub Release 48 路并发分块（单连接仅 15 KB/s） |
 | 前端生产构建 | 4.3 s | Vite 5 + Tailwind 3 |
 | 前端 CSS 产物 | 40.2 KB（gzip 7.2 KB） | Tailwind 展开后 |
-| 自动化测试 | 176 passed / 30.3 s | 无网络、无 LLM |
+| 自动化测试 | 178 passed / 30.3 s | 无网络、无 LLM |
 | 批量入库（13 篇） | 约 6 min（并发 3） | 串行版本需 10 min 以上 |
 | 端到端健康检查 | `dense_available: true`、`reranker_available: true` | 启动预热后 |
 
@@ -1026,6 +1020,30 @@ docker compose up -d
 **SSE 的部署要点**：`deploy/nginx.conf` 中 `proxy_buffering off` / `proxy_cache off` / `proxy_http_version 1.1` / `proxy_set_header Connection ''` / 3600s 超时是一组不可拆分的配置。Nginx 默认缓冲上游响应，一旦缓冲，前端拿到的就是"攒完一次性吐"，逐字流式输出完全失效。这条配置在代码注释中已明确标注原因。
 
 > 单进程形态下不存在反代缓冲问题，但 FastAPI 侧仍显式关闭了响应缓冲并保持 chunked 传输，以保证 SSE 的逐字输出。
+
+#### 容器化构建与验收实测（本机 Windows + Docker Desktop 29.9.3）
+
+| 环节 | 实测 | 说明 |
+|---|---|---|
+| apt 源 | 官方 `deb.debian.org` 约 355 KB/s（26 MB 包 40 s 未完成）→ 清华镜像 **7.5 MB/s**，快 **21 倍** | 构建日志实测 `Fetched 10.2 MB in 4s (2331 kB/s)`；`DEBIAN_MIRROR` / `DEBIAN_SECURITY_MIRROR` 可切回官方源 |
+| 后端镜像构建 | apt 28.4 s + pip 190.3 s + 导出 13.6 s ≈ **4 min** | 换源前同一构建卡死 15 分钟以上 |
+| 后端镜像体积 | **1.19 GB**（site-packages 521 MB） | 默认不装编译工具链（省 ≈ 570 MB）与 torch（省 ≈ 2 GB），均可用构建参数打开 |
+| 前端镜像体积 | **102 MB** | Nginx + Vite 产物 |
+| 容器内测试 | **171 passed / 7 skipped / 1.49 s** | 7 个跳过是镜像内没有真实 PDF 与 bge-m3 权重；与 179 上同一套 178 个用例一致 |
+| compose 全栈 | backend / frontend 均 healthy；`/`、`/ask`、`/api/health` 全部 200 | Nginx 反代 + SPA history fallback |
+| 缺依赖降级 | `llm.ok=false`、`dense_available=false` 时自动退回 BM25 | 检索不崩、接口照常返回 |
+
+**一次真实的"镜像 ≠ 源码"事故（已定位并修复）**
+
+把上面的测试命令搬进镜像后，一个本该通过的用例报错：镜像里的 `contradiction.py` **缺少"排除共有指标名"的修复**——镜像比源码旧。定位只用了三步：
+
+1. `docker run --rm <image> grep -c metric_words ...` → 0；再把工作树挂进容器 `diff -r`，差异正是那段修复；
+2. 重建后镜像内容与工作树 sha256 一致——说明**构建上下文本身没问题**；
+3. `docker buildx history` 给出决定性证据：一次 **15:21:01 启动、耗时 24 分 15 秒**的构建在 **15:45** 才结束，而它启动的时刻比修复的提交时刻（15:27）**早了 6 分钟**——它的上下文快照里还没有那次修复。它结束时把 `latest` 标签指向了旧代码的镜像，**覆盖掉了 15:36 那次已经带修复的构建**。
+
+所以这不是"缓存 bug"，而是**并发构建竞态：先启动的那次最后结束，于是它赢了**。修复方式是纠正标签并重建容器，复测 171 passed / 7 skipped 全绿。
+
+两条教训已固化进仓库：`scripts/ci_docker_test.sh` 在构建之后**先把镜像内代码与工作树 diff 一遍**（不一致直接失败），再在镜像内跑测试——**"构建成功"不等于"镜像等于当前源码"**，交付前必须让镜像自己证明它。
 
 **隧道方案决策**：采用 Cloudflare **quick tunnel**（随机域名），理由是公网演示只需一个可访问的 HTTPS 入口，无需账号与自有域名即可在 NAT 环境一键出网。仓库同时预留 `deploy/nginx.edge.conf.template` 与 `scripts/deploy_edge.sh`，可平滑切换到 **named tunnel** 获得固定域名。
 

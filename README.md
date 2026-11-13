@@ -9,7 +9,6 @@
 [![TypeScript](https://img.shields.io/badge/lang-TypeScript-3178C6?style=flat-square&logo=typescript)](https://www.typescriptlang.org/)
 [![Python](https://img.shields.io/badge/lang-Python%203.11-3776AB?style=flat-square&logo=python)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](#-license)
-[![docker-build](https://github.com/akawrzzby/sciagent/actions/workflows/docker-build.yml/badge.svg)](https://github.com/akawrzzby/sciagent/actions/workflows/docker-build.yml)
 
 ### 实测数据（全部可复跑，脚本见 `scripts/`）
 
@@ -19,7 +18,8 @@
 | 引用可溯源率 traceability | **1.0000**（三轮全满） | `scripts/eval_rag.py` |
 | 库外问题诚实拒答率 | **3 / 3**，编造 0 | `scripts/eval_rag_control.py` |
 | 元数据感知检索 hit@5 | **0.9286 → 1.0000**（A/B，各自重建索引） | `scripts/eval_retrieval_ab.sh` |
-| 自动化测试 | **176 passed**（无网络、无 LLM） | `backend/tests/` |
+| 自动化测试 | **178 passed**（无网络、无 LLM） | `backend/tests/` |
+| Docker 一键构建 | 后端镜像 **4 min / 1.19 GB**，前端 **102 MB** | `scripts/ci_docker_test.sh` |
 | 541 页书籍解析 | **149.4 s** / 1254 章节 / 131 万字符 | §6.5 |
 | 稠密编码吞吐 | **99.7 passages/s**（64 线程；192 线程默认仅 7.2） | §6.5 |
 
@@ -289,6 +289,31 @@ docker compose ps          # backend / frontend / tunnel 三个服务
 
 访问：`http://localhost:8080`（前端已把 `/api` 反代到后端，**单一入口**）。
 
+**本机实测（Windows + Docker Desktop 29.9.3）**
+
+| 项 | 实测 |
+|---|---|
+| 后端镜像构建 | apt 28.4 s + pip 190.3 s + 导出 13.6 s ≈ **4 min**（换源前同一构建卡死 15 分钟以上） |
+| 镜像体积 | 后端 **1.19 GB**（site-packages 521 MB）/ 前端 **102 MB** |
+| 容器内测试 | **171 passed / 7 skipped / 1.49 s**（7 个跳过是镜像内没有真实 PDF 与 bge-m3 权重） |
+| 全栈 | backend / frontend 均 healthy；`/`、`/ask`、`/api/health` 全部 200 |
+| 缺依赖降级 | `llm.ok=false`、`dense_available=false` 时自动退回 BM25，检索不崩 |
+
+镜像默认走**清华 apt 源与 PyPI 源**（官方源在境内约 355 KB/s，会把构建卡死），可按 `.env` 切回：
+
+```bash
+DEBIAN_MIRROR=https://deb.debian.org/debian
+DEBIAN_SECURITY_MIRROR=https://deb.debian.org/debian-security
+```
+
+**验证镜像内容与测试（推荐在提交前跑一次）**
+
+```bash
+bash scripts/ci_docker_test.sh
+```
+
+该脚本会构建镜像 → **把镜像内代码与工作树 `diff` 一遍**（不一致直接失败）→ 在镜像内跑完整测试套件。原因见技术文档 §6.6 记录的"镜像 ≠ 源码"事故：两个并发构建竞态会让**先启动、晚结束**的那次构建用旧上下文覆盖 `latest` 标签，而"构建成功"并不代表镜像等于当前源码。
+
 ### 4.3 本地开发
 
 **后端**
@@ -444,7 +469,13 @@ pytest -v tests/
 - 图谱：PageRank 归一性、k-core 单调性、基石节点判定
 - 扫描件：OCR Markdown 重建标题树与元数据（`test_ocr_structure.py`）
 
-> **实测：`pytest tests/ -q` → 92 passed in 29.82s**（6 个测试文件）。测试全程离线（conftest 已设 `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1`），不依赖网络。
+> **实测：`pytest tests/ -q` → 178 passed in 30.3s**（14 个测试文件，178 个用例）。测试全程离线（conftest 已设 `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1`），不依赖网络。
+
+**在 Docker 镜像里跑同一套测试**（同时校验镜像内容与工作树一致，见 §4.2）：
+
+```bash
+bash scripts/ci_docker_test.sh
+```
 
 ---
 
