@@ -155,7 +155,31 @@ PDF ──▶ 多模态解析 ──▶ 结构化文献库 ──┬──▶ �
 | 扫描件用 VLM 转写而非 tesseract | 实测 Qwen3.8-27B 能准确读出图内文字与双栏顺序；tesseract 在公式与双栏上表现差 |
 | 向量按篇存 `.npy` memmap | 一次查询只加载参与检索的论文，内存与库规模解耦 |
 | SQLite + aiosqlite | 单文件、零运维；异步驱动不阻塞 SSE |
-| 前端同源 `/api` + Nginx 反代 | 避免跨域与"前后端两个公网 URL"的不一致 |
+| 前端同源 `/api`（单进程托管或 Nginx 反代） | API 前缀不可拆分，同源可避免跨域与"前后端两个公网 URL"的不一致 |
+| 稠密检索走 CPU + **64 线程** | GPU 已被 vLLM 占满；实测 192 线程仅 7.2 passages/s，**64 线程达 99.7 passages/s**（14×），线程过度调度反而压倒收益 |
+| 解析 CPU 密集段下沉线程池 | PyMuPDF 抽取与渲染是同步阻塞调用，放在事件循环里会卡死 SSE 心跳与全部请求 |
+| **表格提取强制串行** | 实测 `Page.find_tables()` 存在全局状态竞争：同文档并行只出 **1** 张表，串行出 **5** 张——并行会静默丢表 |
+| PyMuPDF Document **每线程独立句柄** | `Document` 不可跨线程共享；用 `doc.name` 取绝对路径后按线程重开，杜绝数据竞争 |
+
+### 2.5 两个真实缺陷的复盘
+
+> 这两处都不是"一开始就想对了"，而是实测撞墙后定位根因再修。放在 README 里，是因为它们最能说明工程能力——**知道边界在哪，比知道怎么写更要紧**。
+
+**① 外键约束与 Unit of Work 的插入顺序**
+
+症状：`/api/papers` 恒为 0，单篇入库报 `sqlite3.IntegrityError: FOREIGN KEY constraint failed`（`INSERT INTO content_blocks`，479 行）。
+
+根因（用 `engine.echo=True` 打出真实 SQL 才定位到）：SQLAlchemy Unit of Work **只按 ORM `relationship()` 推导插入顺序，不认表级 `ForeignKey` 约束**。`ContentBlock` / `PaperTable` / `PaperFigure` / `PaperFormula` 只有 `ForeignKey("papers.id")` 而没有 relationship，被当作互不相关的独立表，其 INSERT 被排到父行之前 → 外键检查失败。
+
+修复（两层）：为四张子表补 `relationship(back_populates=...)`；`_persist` 改传 `paper=paper` 对象并在挂子行前 `await db.flush()` 先落盘父行。
+
+验证：`scripts/diag_fk.py` 五变体全通过（裸 FK / 父行先 flush / 仅带 relationship 的模型 / 赋值 relationship 对象 / 完整修复路径）。
+
+**② 表格提取的线程安全边界**
+
+把页面解析整体并行化后，表格数从 53 掉到 13。`scripts/check_table_threads.py` 复现出决定性证据：同一文档**串行提取得 5 张表，并行只 1 张**——`Page.find_tables()` 存在全局状态竞争。
+
+结论：**表格提取必须串行**，移出并行区；其余抽取与渲染才下沉线程池。同时 PyMuPDF `Document` 改为每线程独立句柄（`doc.name` 取绝对路径后按线程重开）。修复后表格数回到 53。
 
 ---
 
@@ -176,6 +200,11 @@ PDF ──▶ 多模态解析 ──▶ 结构化文献库 ──┬──▶ �
 | 语义去重 | 标题 + 摘要 embedding 余弦 > 阈值 → 判为同论文不同版本 |
 
 > **实测**：`1706.03762v1.pdf`（Attention Is All You Need）15 页 **2.5 秒**解析完成，标题、8 位作者、机构、1566 字摘要、26 级标题树（含 `3.2.2 Multi-Head Attention`）、3 表 / 8 图 / 8 公式 / **76 条结构化参考文献** 全部正确。
+>
+> **长文档与扫描件实测**：
+> - 赛题指定的 **541 页书籍**：`UnderstandingDeepLearning_02_09_26_C.pdf` → **149.4 秒**完成，产出 **1254** 个章节节点、1 313 060 字符、**726** 张图、**1472** 个公式，无 OOM、无告警。
+> - **纯扫描件** `1706.03762v1_img.pdf`（文本层 0 字符）→ **191.2 秒**，VLM 转写后重建出 **26 级标题树**，`3.2.2 Multi-Head Attention` 层级判定为 level 3 ✓，并解析出 **38 条**结构化参考文献。
+> - **全量文献库 13 篇**（含扫描件）→ 433 页 / 2151 片段 / 748 参考文献 / 53 表 / 212 图 / 380 公式；文档级并发入库约 **6 分钟**（串行需 10 分钟以上）。
 
 ### 模块 2 · 抗幻觉 RAG 与 Agent 编排 `backend/app/rag/` `backend/app/agents/`
 
@@ -300,6 +329,8 @@ cd frontend && npm run build   # 产物在 frontend/dist
 
 技术方案：后端 FastAPI 直接托管前端构建产物（`STATIC_DIR`），`/api` 与 SPA 同源；对外由 **Cloudflare Tunnel** 暴露单一 HTTPS 地址，因此在 NAT 环境（无公网 IP）下也能提供公网可访问的演示地址。
 
+**当前部署形态**：全部收敛到 **单台 179 服务器单进程同源托管**（FastAPI :9000 同时提供 `/api/*` 与前端 SPA），cloudflared quick tunnel 出公网。仓库同时保留完整 Docker Compose 编排，供评审在有 Docker 权限的机器上一键复现。
+
 **一键复现**（仓库已提供完整的容器化编排，评审可在本机完整拉起）：
 
 ```bash
@@ -312,7 +343,7 @@ docker compose up -d --build
 
 **隧道保活**：`scripts/start_tunnel.sh 9000` 会启动 cloudflared 并把公网地址写入 `~/sciagent/tunnel.url`；脚本内置 supervisor 循环，链路断开后自动重连。
 
-> ⚠️ 当前演示地址为 Cloudflare **quick tunnel**（随机域名），重启后地址会变化。若需要评审期内地址固定，请配置 **named tunnel**（提供 Cloudflare 账号或自有域名即可，本仓库已预留 `deploy/nginx.edge.conf.template` 与 `scripts/deploy_edge.sh`）。
+> ℹ️ **关于演示地址**：当前采用 Cloudflare **quick tunnel**（随机域名），这是团队 2026-11-12 的**最终决策**——公网演示只需要一个可访问的 HTTPS 入口，quick tunnel 无需账号与自有域名即可在 NAT 环境一键出网。若评审期内需要地址固定，仓库已预留 `deploy/nginx.edge.conf.template` 与 `scripts/deploy_edge.sh`，可平滑切换到 **named tunnel**；若后端进程重启导致隧道重建，请重新执行 `scripts/start_tunnel.sh` 并从 `~/sciagent/tunnel.url` 取新地址。
 
 ---
 
@@ -370,9 +401,11 @@ sciagent/
 │   │   └── store.ts     zustand 全局状态
 │   ├── package.json
 │   └── vite.config.ts
-├── deploy/              nginx.conf · entrypoint.sh
-├── docs/                technical-report.md · demo-script.md
-├── scripts/             模型下载 · 解析冒烟 · 启动脚本
+├── deploy/              nginx.conf · nginx.edge.conf.template · entrypoint.sh
+├── docs/                technical-report.md · technical-report.pdf · demo-script.md
+├── scripts/             部署(run_backend/restart_backend/start_tunnel) · 灌库(seed_*) ·
+│                        模型下载(download_models/parallel_download) · 解析(parse_smoke) ·
+│                        诊断(diag_fk/check_table_threads/db_inspect) · 文档(md2pdf)
 ├── docker-compose.yml
 └── .env.example
 ```
@@ -394,6 +427,9 @@ pytest -v tests/
 - 检索：BM25 通道、Dense 通道、RRF 融合、rerank 精排
 - 护栏：证据绑定、幻觉引用剔除、无据拒答
 - 图谱：PageRank 归一性、k-core 单调性、基石节点判定
+- 扫描件：OCR Markdown 重建标题树与元数据（`test_ocr_structure.py`）
+
+> **实测：`pytest tests/ -q` → 92 passed in 29.82s**（6 个测试文件）。测试全程离线（conftest 已设 `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1`），不依赖网络。
 
 ---
 
