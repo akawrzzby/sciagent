@@ -12,7 +12,7 @@
 |---|---|
 | **作品名称** | SciAgent · 科研小助手 |
 | **赛项** | 智领科研·意图驱动：基于大模型与 Agent 架构的全流程科研助手构建 |
-| **团队** | SciAgent Team（待补充：成员姓名 / 学校 / 学院专业 / 指导老师 / 联系方式） |
+| **团队** | SciAgent Team · 成员：魏任泽 · 西安交通大学 电子与信息学部 软件学院 · 指导老师：刘帅 |
 | **仓库** | https://github.com/akawrzzby/sciagent |
 | **在线演示** | https://finished-editing-shore-mrna.trycloudflare.com |
 | **文档版本** | v1.0 · 2026-11 |
