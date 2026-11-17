@@ -44,6 +44,15 @@ _TAG_NUMBER = re.compile(r"\\tag\*?\{([^}]{1,24})\}")
 #: ``(3)`` / ``(A.1)`` -- the number the paper prints at the right margin.
 _PAREN_NUMBER = re.compile(r"\(([A-Z]?\.?\d{1,3}(?:\.\d{1,3})?)\)\s*$")
 
+#: A heading that is nothing but an equation number: ``(1)``, ``(2a)``.
+_EQUATION_LABEL = re.compile(r"\(?\d{1,3}[a-z]?\)?")
+
+#: A heading that starts with a section number: ``3``, ``3.2``, ``A.1``.
+_SECTION_NUMBER = re.compile(r"^(?:\d+(?:\.\d+)*|[A-Z](?:\.\d+)+)")
+
+#: A chapter of the appendix: ``A Evaluation Datasets``.
+_LETTERED_HEADING = re.compile(r"^[A-Z]\s+\S")
+
 
 # --------------------------------------------------------------------------- helpers
 def _normalise(text: str) -> str:
@@ -151,21 +160,23 @@ def _sentences(block_id: str, text: str, segments: _Segments) -> list[Sentence]:
 
 # ---------------------------------------------------------------------------- blocks
 def _heading_blocks(sections: list[dict[str, Any]], segments: _Segments,
-                    blocks: list[dict[str, Any]] | None = None) -> list[Block]:
+                    blocks: list[dict[str, Any]] | None = None,
+                    paper_title: str = "") -> list[Block]:
     """One heading block per node of the section tree.
 
     A section row carries no reading position, but the same title also arrives
     as a ``text`` block, which does.  That block is the one the order is taken
     from; without it a heading would sort to the top of its page.
     """
-    positions: dict[tuple[str, int], float] = {}
+    positions: dict[tuple[str, int], tuple[float, list[float]]] = {}
     for block in blocks or []:
         key = (_normalise(block.get("content") or "").lower(), _page(block))
         order = _order(block)
         if order:
-            positions.setdefault(key, order)
+            positions.setdefault(key, (order, _bbox(block.get("bbox"))))
 
     out: list[Block] = []
+    candidates: list[tuple[Block, str]] = []
     for section in sections:
         title = _normalise(section.get("title") or "")
         if not title:
@@ -179,17 +190,57 @@ def _heading_blocks(sections: list[dict[str, Any]], segments: _Segments,
         # Section rows number themselves on their own scale (0, 1, 2 …), which
         # cannot be compared with the block positions; only the text block that
         # carries the same title is on the right scale.
-        order = positions.get((label.lower(), page), 0.0)
-        out.append(Block(
+        order, bbox = positions.get((label.lower(), page), (0.0, []))
+        candidates.append((Block(
             kind="heading",
             page_no=page,
-            bbox=_bbox(section.get("bbox")),
+            bbox=_bbox(section.get("bbox")) or bbox,
             id=str(section.get("id") or ""),
             level=max(2, level),
             text=label,
             target=segments.target(title),
             order=order,
-        ))
+        ), title.lower()))
+
+    # The running head printed at the top of every page is parsed as a section
+    # whose title is the paper's own title.  A title that shows up on three or
+    # more pages is that running head too, not a section: keeping it turns the
+    # chapter numbering into one fake chapter per page.
+    title_key = _normalise(paper_title).lower()
+    pages_by_title: dict[str, set[int]] = {}
+    for block, bare in candidates:
+        pages_by_title.setdefault(bare, set()).add(block.page_no)
+
+    first_page = min((block.page_no for block, _ in candidates), default=1)
+    seen_abstract = False
+    seen_appendix = False
+
+    for block, bare in candidates:
+        text = _normalise(block.text)
+        if bare == "abstract":
+            seen_abstract = True
+        if title_key and bare == title_key:
+            continue
+        if len(pages_by_title[bare]) >= 3:
+            continue
+        # An equation number is set like a heading ("(1)") and is picked up as
+        # one, but it has no words in it.
+        if _EQUATION_LABEL.fullmatch(text):
+            continue
+        # Everything above the abstract on the first page is front matter: the
+        # title, the authors, their affiliations.  The masthead already shows
+        # the first two, and an author line is never a section.
+        if (not seen_abstract and block.page_no == first_page
+                and not _SECTION_NUMBER.match(text)):
+            continue
+        # An appendix is lettered (A, B, C …).  A numbered list inside one is a
+        # set of instructions, not a chapter, but its items are parsed as
+        # chapters numbered 1, 2, 3 ….
+        if block.level <= 2 and _LETTERED_HEADING.match(text):
+            seen_appendix = True
+        elif seen_appendix and block.level <= 2 and text[:1].isdigit():
+            continue
+        out.append(block)
     return out
 
 
@@ -317,60 +368,69 @@ def _formula_block(formula: dict[str, Any], paper_id: str) -> Block:
 
 
 def _reading_key(block: Block) -> tuple[int, float, float, float]:
-    """Reading position: page, then the parser's column-aware order.
-
-    Sorting by the top of the box interleaves the two columns of a paper: the
-    left column stops halfway down the page, so every right-column paragraph
-    lands between the last left-column paragraph and the next one.  ``order``
-    comes from the parser, which already walks the paper column by column;
-    the box is only the tie breaker and the fallback.
-    """
+    """Kept for the tests: page, then the top of the block, then its left edge."""
     y = block.bbox[1] if len(block.bbox) >= 4 else float("inf")
     x = block.bbox[0] if len(block.bbox) >= 4 else float("inf")
     return (block.page_no, block.order, y, x)
 
 
-def _place_media(blocks: list[Block]) -> None:
-    """Give every table, figure and formula a slot among the paragraphs.
+def _sort_by_layout(blocks: list[Block]) -> list[Block]:
+    """Put the blocks of a paper in reading order, from geometry alone.
 
-    The parser numbers the text blocks of a page but not the objects, so an
-    object would otherwise sort to the top of its page.  Each one is placed
-    just before the first numbered block that starts below it in the same
-    column.
+    The parser also numbers the blocks, but its numbering is only column aware
+    on the pages where its own column detection succeeded: on a page where it
+    failed, the number is a plain top-to-bottom sweep and a right-column
+    heading ends up before the left-column text that precedes it.
+
+    So the order is rebuilt here:
+
+    * a block wider than 55% of the text area spans the columns (a figure, a
+      full-width table, a caption); those split the page into bands,
+    * inside a band the left column is read to its bottom, then the right one,
+    * within a column the blocks go top to bottom.
+
+    A band starts with the spanning block that opens it, so ``(band, column)``
+    is enough: spanning blocks take column 0 and the columns below them take
+    1 and 2.
     """
     by_page: dict[int, list[Block]] = {}
     for block in blocks:
         by_page.setdefault(block.page_no, []).append(block)
 
-    for items in by_page.values():
-        numbered = [b for b in items if b.order > 0 and len(b.bbox) >= 4]
-        if not numbered:
-            for block in items:
-                if block.order <= 0:
-                    block.order = 0.5
+    ordered: list[Block] = []
+    for page in sorted(by_page):
+        items = by_page[page]
+        boxes = [b.bbox for b in items if len(b.bbox) >= 4]
+        if not boxes:
+            ordered.extend(sorted(items, key=lambda b: (b.kind, b.id)))
             continue
-        edges = [b.bbox[0] for b in numbered] + [b.bbox[2] for b in numbered]
-        middle = (min(edges) + max(edges)) / 2
-        span = max(edges) - min(edges)
-        numbered.sort(key=lambda b: (b.order, b.bbox[1]))
-        for block in items:
-            if block.order > 0:
-                continue
+        left_edge = min(b[0] for b in boxes)
+        right_edge = max(b[2] for b in boxes)
+        width = max(right_edge - left_edge, 1.0)
+        middle = (left_edge + right_edge) / 2
+
+        spanning = [b for b in items
+                    if len(b.bbox) >= 4 and (b.bbox[2] - b.bbox[0]) > width * 0.55]
+        spanning.sort(key=lambda b: (b.bbox[1], b.bbox[0]))
+        band_of: dict[int, int] = {id(b): index for index, b in enumerate(spanning)}
+
+        def key(block: Block) -> tuple[int, int, float, float]:
             if len(block.bbox) < 4:
-                block.order = numbered[-1].order + 0.5
-                continue
-            column = 0 if block.bbox[0] < middle else 1
-            # A figure or a table often spans both columns; it then belongs
-            # above everything that starts below its bottom edge.
-            wide = (block.bbox[2] - block.bbox[0]) > span * 0.6
-            placed = None
-            for other in numbered:
-                other_column = 0 if other.bbox[0] < middle else 1
-                below = other.bbox[1] >= (block.bbox[3] if wide else block.bbox[1])
-                if below and (wide or other_column == column):
-                    placed = other.order - 0.5
-                    break
-            block.order = placed if placed is not None else numbered[-1].order + 0.5
+                return (10 ** 6, 0, 0.0, 0.0)
+            y = block.bbox[1]
+            band = band_of.get(id(block))
+            if band is not None:
+                return (band, 0, y, block.bbox[0])
+            # everything below a spanning block belongs to the next band
+            band = sum(1 for b in spanning if b.bbox[3] <= y)
+            column = 0 if (block.bbox[0] + block.bbox[2]) / 2 < middle else 1
+            return (band, column + 1, y, block.bbox[0])
+
+        ordered.extend(sorted(items, key=key))
+
+    for index, block in enumerate(ordered):
+        block.order = float(index)
+    return ordered
 
 
 def _author_names(value: Any) -> list[str]:
@@ -512,17 +572,15 @@ async def build_document(paper_id: str, lang: str = "zh") -> Document | None:
 
     blocks: list[Block] = []
     blocks.extend(_heading_blocks(list(structure.get("sections") or []), segments,
-                                  list(structure.get("blocks") or [])))
+                                  list(structure.get("blocks") or []),
+                                  str(paper.get("title") or structure.get("title") or "")))
     blocks.extend(_paragraph_blocks(list(structure.get("blocks") or []),
                                     segments, attached_captions))
     blocks.extend(_table_block(table, paper_id, segments) for table in tables)
     blocks.extend(_figure_block(figure, paper_id, segments) for figure in figures)
     blocks.extend(_formula_block(formula, paper_id) for formula in formulas)
     blocks = _drop_shadowed(blocks)
-    _place_media(blocks)
-    # Python's sort is stable, so elements that share a position keep the
-    # order they were collected in.
-    blocks.sort(key=_reading_key)
+    blocks = _sort_by_layout(blocks)
 
     title = _normalise(paper.get("title") or "") or _normalise(structure.get("title") or "")
     abstract = _normalise(paper.get("abstract") or "")
