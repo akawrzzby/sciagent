@@ -69,6 +69,9 @@
 \newenvironment{aside}{\par\vspace{2pt}\begingroup\zihao{5}\kaishu
   \leftskip=2em\rightskip=2em\noindent\ignorespaces}{\par\endgroup\vspace{2pt}}
 
+% ---- 圈号 ①② 与带圈字母：xeCJK 默认不把这两段交给中文字体，需显式指定
+\xeCJKDeclareCharClass{CJK}{"2460 -> "24FF, "3200 -> "33FF}
+
 \begin{document}
 \thispagestyle{empty}
 \begin{center}

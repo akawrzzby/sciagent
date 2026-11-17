@@ -135,25 +135,6 @@ function pickCaption(
   return best?.text ?? ''
 }
 
-/**
- * The number of an equation ("(1)"), taken from the LaTeX tag or from the
- * number the PDF prints at the right margin.
- *
- * A display equation that spans several lines carries its number in the
- * middle of the block, so the last number of the text is used when the text
- * does not end with one.
- */
-function equationNumber(formula: FormulaItem): string {
-  const tag = formula.latex?.match(/\\tag\{([^}]*)\}/)
-  if (tag) return tag[1]
-  const text = formula.raw_text ?? ''
-  const tail = text.match(/\((\d{1,2}[a-z]?)\)\s*$/)
-  if (tail) return tail[1]
-  const anywhere = [...text.matchAll(/\((\d{1,2}[a-z]?)\)/g)]
-  if (anywhere.length) return anywhere[anywhere.length - 1][1]
-  return ''
-}
-
 /* ========================================================================== */
 /* the document model                                                          */
 /* ========================================================================== */
@@ -256,6 +237,27 @@ function buildDocument(
   // paragraph of its own.  Older data has no labels at all, in which case
   // everything that is not excluded is treated as prose.
   const typed = blocks.some((block) => (block.type || '').toLowerCase() === 'body')
+  // A table's text is also emitted as a body block, and it arrives flattened
+  // ("Average System MNLI-(m/mm) QQP ...") because a PDF has no cell structure
+  // in its text layer.  The table itself is shown as the crop of the page, so
+  // any block whose centre falls inside a table, figure or formula box is
+  // dropped: it is the text of an object that is already on the page.
+  const mediaBoxes = media
+    .map((item) => item.kind === 'figure' ? item.figure.bbox
+      : item.kind === 'table' ? item.table.bbox
+      : item.kind === 'formula' ? item.formula.bbox
+      : undefined)
+    .filter((box): box is number[] => Array.isArray(box) && box.length >= 4)
+
+  const insideMedia = (box?: number[]): boolean => {
+    if (!box || box.length < 4) return false
+    const cx = (box[0] + box[2]) / 2
+    const cy = (box[1] + box[3]) / 2
+    return mediaBoxes.some(
+      (outer) => cx >= outer[0] - 2 && cx <= outer[2] + 2 && cy >= outer[1] - 2 && cy <= outer[3] + 2,
+    )
+  }
+
   for (const block of blocks) {
     const type = (block.type || '').toLowerCase()
     if (type === 'footnote') {
@@ -271,6 +273,8 @@ function buildDocument(
     if (paperTitle && text.toLowerCase() === paperTitle) continue
     // A caption that belongs to a figure or a table is shown with it.
     if (usedCaptions.has(text.toLowerCase())) continue
+    // The text of a table or a figure is already shown as the object itself.
+    if (type !== 'caption' && insideMedia(block.bbox as number[] | undefined)) continue
     proseBlocks.push(block)
   }
 
@@ -868,7 +872,6 @@ function ItemView({
 
   if (item.kind === 'formula') {
     const { formula } = item
-    const number = equationNumber(formula)
     return (
       <figure className="paper-formula">
         {formula.image_url ? (
@@ -881,15 +884,6 @@ function ItemView({
         ) : (
           <div className="paper-formula-fallback">{formula.raw_text}</div>
         )}
-        <figcaption className="paper-formula-caption">
-          {number ? `公式 ${number}` : '公式'}
-          {formula.latex && (
-            <details className="paper-formula-latex">
-              <summary>LaTeX</summary>
-              <code>{formula.latex}</code>
-            </details>
-          )}
-        </figcaption>
       </figure>
     )
   }
@@ -913,15 +907,6 @@ function ItemView({
             className="prose-paper text-[14px]"
             dangerouslySetInnerHTML={{ __html: mdToHtml(table.markdown) }}
           />
-        )}
-        {table.image_url && table.markdown && (
-          <details className="paper-table-text">
-            <summary>表格文本</summary>
-            <div
-              className="prose-paper text-[13px]"
-              dangerouslySetInnerHTML={{ __html: mdToHtml(table.markdown) }}
-            />
-          </details>
         )}
       </figure>
     )

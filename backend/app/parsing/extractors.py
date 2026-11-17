@@ -11,6 +11,7 @@ the rendered equation directly.
 from __future__ import annotations
 
 import io
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -215,25 +216,87 @@ def _read_grid(page: pymupdf.Page,
                bbox: tuple[float, float, float, float]) -> list[list[str]]:
     """Read the cells of the table that lives in ``bbox``.
 
-    The region is bounded by the rules of the table, so the column structure
-    can be inferred from the words inside it.
+    The columns are inferred from the *gutters*: the x-ranges that no word
+    crosses anywhere in the table.  A cell whose text wraps stays inside its
+    own column, so the gutter between two columns stays empty, while a wrapped
+    word never opens a gutter of its own.
+
+    ``find_tables(strategy="text")`` was used before and cannot do this: it
+    treats the gap between two words as a column border, so "per Layer" came
+    back as "p | er Layer" and "Sequential Maximum Path" as
+    "Sequential Maxim | um Path".
     """
-    rect = pymupdf.Rect(bbox[0] - 2, bbox[1] - 2, bbox[2] + 2, bbox[3] + 2)
-    rect = rect & page.rect
+    rect = pymupdf.Rect(bbox[0] - 2, bbox[1] - 2, bbox[2] + 2, bbox[3] + 2) & page.rect
     try:
-        finder = page.find_tables(strategy="text", clip=rect, min_words_vertical=2)
-        tables = list(getattr(finder, "tables", []) or [])
+        words = page.get_text("words", clip=rect)
     except Exception:
         return []
-    if not tables:
+    words = [w for w in words if (w[4] or "").strip()]
+    if len(words) < 4:
         return []
-    tbl = max(tables, key=lambda t: (t.bbox[2] - t.bbox[0]) * (t.bbox[3] - t.bbox[1]))
-    try:
-        data = tbl.extract()
-    except Exception:
+
+    # ---- columns: maximal x-ranges with no word on any line ----------------
+    spans = sorted((float(w[0]), float(w[2])) for w in words)
+    merged: list[list[float]] = []
+    for x0, x1 in spans:
+        if merged and x0 <= merged[-1][1] + 1.5:
+            merged[-1][1] = max(merged[-1][1], x1)
+        else:
+            merged.append([x0, x1])
+    left, right = merged[0][0], merged[-1][1]
+    # a gutter narrower than this is word spacing, not a column border
+    min_gutter = float(os.environ.get("SCIAGENT_MIN_GUTTER", "0")) or max(5.0, (right - left) * 0.018)
+    edges = [left]
+    for prev, cur in zip(merged, merged[1:]):
+        if cur[0] - prev[1] >= min_gutter:
+            edges.append((prev[1] + cur[0]) / 2)
+    edges.append(right)
+    if len(edges) < 2:
         return []
-    rows = [[(c or "").replace("\n", " ").strip() for c in row] for row in data]
-    return [r for r in rows if any(c for c in r)]
+    width = len(edges) - 1
+
+    # ---- lines: cluster the words by their vertical centre ------------------
+    # The tolerance is generous on purpose: a formula is set with superscripts
+    # and subscripts whose own boxes sit on a different baseline, and they
+    # belong to the same line as the base text.
+    lines: list[list[tuple[float, float, str]]] = []
+    current: list[tuple[float, float, str]] = []
+    last_y = None
+    for w in sorted(words, key=lambda w: (round((w[1] + w[3]) / 2, 1), w[0])):
+        centre = (float(w[1]) + float(w[3])) / 2
+        height = max(1.0, float(w[3]) - float(w[1]))
+        if last_y is not None and abs(centre - last_y) > height * 0.85:
+            lines.append(sorted(current, key=lambda item: item[0]))
+            current = []
+        current.append((float(w[0]), float(w[2]), (w[4] or "").strip()))
+        last_y = centre
+    if current:
+        lines.append(sorted(current, key=lambda item: item[0]))
+
+    # ---- fill the grid ------------------------------------------------------
+    grid: list[list[str]] = []
+    for line in lines:
+        cells = [""] * width
+        for x0, x1, text in line:
+            centre = (x0 + x1) / 2
+            for index in range(width):
+                if edges[index] <= centre <= edges[index + 1]:
+                    cells[index] = (cells[index] + " " + text).strip()
+                    break
+        grid.append(cells)
+
+    # ---- merge the wrapped continuation of a cell into the row above --------
+    merged_rows: list[list[str]] = []
+    for row in grid:
+        filled = [i for i, c in enumerate(row) if c]
+        if merged_rows and len(filled) == 1:
+            above = merged_rows[-1]
+            index = filled[0]
+            if above[index]:
+                above[index] = (above[index] + " " + row[index]).strip()
+                continue
+        merged_rows.append(row)
+    return [r for r in merged_rows if any(c for c in r)]
 
 
 def _bbox_overlap(a: tuple[float, float, float, float],
