@@ -30,6 +30,8 @@ import {
   TableItem,
 } from '../lib/api'
 import { EmptyState, Modal, Spinner, Tabs, Toast } from '../components/ui'
+import { DocumentView } from '../components/document'
+import type { PaperDocument } from '../lib/document'
 import { useSciStore } from '../store'
 
 type ViewMode = 'en' | 'zh'
@@ -438,8 +440,40 @@ export default function Reader() {
   const [activeRef, setActiveRef] = useState<number | null>(null)
   const [translation, setTranslation] = useState<TranslationState>(IDLE_TRANSLATION)
   const [tip, setTip] = useState<{ text: string; top: number; left: number } | null>(null)
+  // The re-laid-out reading view is the default: the paper is rebuilt from the
+  // parsed blocks so that tables become real tables and formulas are typeset
+  // instead of shown as pictures of themselves.  'layout' keeps the faithful
+  // rendering of the original typesetting.
+  const [viewMode, setViewMode] = useState<'reflow' | 'layout'>('reflow')
+  const [paperDoc, setPaperDoc] = useState<PaperDocument | null>(null)
+  const [docState, setDocState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
 
   const pollTimer = useRef<number | null>(null)
+
+  /* ------------------------------------------------------- document view */
+  useEffect(() => {
+    if (!id || viewMode !== 'reflow') return
+    let cancelled = false
+    setDocState('loading')
+    ;(async () => {
+      try {
+        const data = await api.document(id, mode === 'zh' ? 'zh' : 'en')
+        if (cancelled) return
+        setPaperDoc(data)
+        setDocState('ready')
+      } catch {
+        if (cancelled) return
+        // The re-laid-out view needs the backend endpoint; when it is absent
+        // the reader falls back to the faithful layout instead of erroring.
+        setPaperDoc(null)
+        setDocState('error')
+        setViewMode('layout')
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [id, viewMode, mode])
 
   /* --------------------------------------------------------------- load */
   useEffect(() => {
@@ -626,6 +660,15 @@ export default function Reader() {
             value={mode}
             onChange={switchMode}
           />
+          <span className="mx-1 h-5 w-px bg-ink-200 dark:bg-ink-700" />
+          <Tabs
+            tabs={[
+              { id: 'reflow' as const, label: '重排' },
+              { id: 'layout' as const, label: '原版式' },
+            ]}
+            value={viewMode}
+            onChange={setViewMode}
+          />
         </div>
       </header>
 
@@ -701,6 +744,19 @@ export default function Reader() {
               <EmptyState
                 title="没有可显示的正文"
                 hint="该文献尚未解析出章节结构，可能仍在解析中。"
+              />
+            </div>
+          ) : viewMode === 'reflow' && docState === 'loading' ? (
+            <div className="flex h-full items-center justify-center gap-2 text-ink-400">
+              <Spinner className="h-5 w-5" />
+              <span className="font-sans text-sm">正在重排文档…</span>
+            </div>
+          ) : viewMode === 'reflow' && paperDoc ? (
+            <div className="doc-scroll mx-auto w-full max-w-[1000px] px-4 py-6 sm:px-8">
+              <DocumentView
+                doc={paperDoc}
+                lang={mode === 'zh' ? 'zh' : 'en'}
+                onCite={(marker) => jumpToReference(Number.parseInt(marker, 10))}
               />
             </div>
           ) : (

@@ -121,6 +121,8 @@ def create_app() -> FastAPI:
     # ``/api/reader/{paper_id}/translation`` and the first match wins.
     for module in (health, papers, rag, translation, reader, search, graph, writing, viz, admin):
         app.include_router(module.router, prefix="/api")
+    from app.api.routers import document
+    app.include_router(document.router, prefix="/api")
 
     # ------------------------------------------------------------- errors
     @app.exception_handler(Exception)

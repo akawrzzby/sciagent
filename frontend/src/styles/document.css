@@ -1,0 +1,637 @@
+/* ==========================================================================
+   Document reading view — the re-laid-out paper.
+   --------------------------------------------------------------------------
+   Every class name in this file is prefixed `doc-`; the components import this
+   stylesheet themselves, so the view also works outside the main reading sheet
+   (index.css is not required).
+
+   Dark mode follows the application convention: the `dark` class on <html>.
+   Colours are kept in custom properties so the whole view flips with one block
+   of overrides instead of a `.dark` rule per component.
+   ========================================================================== */
+
+/* ---------------------------------------------------------------- tokens */
+.doc-view {
+  --doc-fg: #1d2836;
+  --doc-fg-strong: #131b26;
+  --doc-muted: #566f8a;
+  --doc-faint: #7890a8;
+  --doc-border: #cfd9e4;
+  --doc-border-soft: #e8edf3;
+  --doc-surface: #ffffff;
+  --doc-surface-alt: #f5f7fa;
+  --doc-accent: #b74c06;
+  --doc-accent-soft: #fff8ed;
+  --doc-accent-border: #ffc471;
+  --doc-cite-bg: #fff8ed;
+  --doc-cite-fg: #b74c06;
+  --doc-cite-border: #ffdda8;
+
+  --doc-serif: 'Source Serif 4', 'Noto Serif SC', Georgia, Cambria, serif;
+  --doc-sans: 'Inter', 'Noto Sans SC', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --doc-mono: 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  max-width: 100%;
+  font-family: var(--doc-serif);
+  font-size: 1.0625rem;
+  line-height: 1.9;
+  color: var(--doc-fg);
+  overflow-wrap: break-word;
+}
+
+.dark .doc-view {
+  --doc-fg: #efece2;
+  --doc-fg-strong: #f8f6f0;
+  --doc-muted: #a8b8ca;
+  --doc-faint: #7890a8;
+  --doc-border: #33465c;
+  --doc-border-soft: #2b3a4c;
+  --doc-surface: #1d2836;
+  --doc-surface-alt: #131b26;
+  --doc-accent: #ffa338;
+  --doc-accent-soft: rgba(249, 132, 18, 0.14);
+  --doc-accent-border: #7a310d;
+  --doc-cite-bg: rgba(249, 132, 18, 0.16);
+  --doc-cite-fg: #ffc471;
+  --doc-cite-border: #943b0c;
+}
+
+/* --------------------------------------------------------------- masthead */
+.doc-masthead {
+  margin-bottom: 1.8rem;
+  padding-bottom: 1.1rem;
+  border-bottom: 1px solid var(--doc-border);
+}
+
+.doc-title {
+  margin: 0;
+  font-family: var(--doc-serif);
+  font-size: 1.55rem;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.005em;
+  color: var(--doc-fg-strong);
+}
+
+.doc-title-source {
+  display: block;
+  margin-top: 0.45rem;
+  font-family: var(--doc-sans);
+  font-size: 0.82rem;
+  font-weight: 400;
+  line-height: 1.55;
+  color: var(--doc-muted);
+}
+
+.doc-authors {
+  margin: 0.7rem 0 0;
+  font-family: var(--doc-sans);
+  font-size: 0.88rem;
+  line-height: 1.6;
+  color: var(--doc-muted);
+}
+
+/* ----------------------------------------------------------------- blocks */
+.doc-block {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  column-gap: 0.7rem;
+  align-items: start;
+}
+
+.doc-block-body {
+  min-width: 0;
+}
+
+/* The page chip: quiet until touched, but always there to jump back. */
+.doc-page {
+  grid-column: 2;
+  margin-top: 0.55em;
+  padding: 0.1rem 0.32rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--doc-faint);
+  font-family: var(--doc-mono);
+  font-size: 0.64rem;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  opacity: 0.55;
+  transition: opacity 120ms ease, color 120ms ease, background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+button.doc-page {
+  cursor: pointer;
+}
+
+.doc-page:hover,
+.doc-page:focus-visible {
+  opacity: 1;
+  outline: none;
+  color: var(--doc-accent);
+  background: var(--doc-accent-soft);
+  border-color: var(--doc-accent-border);
+}
+
+.doc-page-static {
+  cursor: default;
+}
+
+/* ------------------------------------------------------------ typography */
+.doc-heading {
+  margin: 1.9rem 0 0.6rem;
+  font-family: var(--doc-sans);
+  font-weight: 600;
+  line-height: 1.45;
+  letter-spacing: -0.01em;
+  color: var(--doc-fg-strong);
+  text-align: left;
+}
+
+.doc-block:first-child .doc-heading {
+  margin-top: 0;
+}
+
+.doc-heading-1 {
+  margin-top: 2.3rem;
+  font-size: 1.2rem;
+}
+
+.doc-heading-2 {
+  font-size: 1.05rem;
+}
+
+.doc-heading-3 {
+  font-size: 0.95rem;
+  color: var(--doc-fg);
+}
+
+.doc-paragraph {
+  margin: 0 0 1.05em;
+  text-align: justify;
+  hyphens: auto;
+}
+
+.doc-list {
+  margin: 0 0 1.1em;
+  padding-left: 1.4rem;
+  list-style: disc;
+}
+
+.doc-list-item {
+  margin: 0.22em 0;
+  text-align: justify;
+}
+
+.doc-footnote {
+  margin: 0 0 0.7em;
+  padding-left: 0.7rem;
+  border-left: 2px solid var(--doc-border);
+  font-family: var(--doc-sans);
+  font-size: 0.8rem;
+  line-height: 1.7;
+  color: var(--doc-muted);
+}
+
+.doc-reference {
+  margin: 0 0 0.6em;
+  font-family: var(--doc-sans);
+  font-size: 0.8rem;
+  line-height: 1.7;
+  color: var(--doc-muted);
+}
+
+.doc-note {
+  margin: 0.5em 0 1em;
+  font-family: var(--doc-sans);
+  font-size: 0.74rem;
+  line-height: 1.6;
+  color: var(--doc-faint);
+}
+
+.doc-empty {
+  margin: 0 0 1em;
+  font-family: var(--doc-sans);
+  font-size: 0.8rem;
+  color: var(--doc-faint);
+}
+
+.doc-hint {
+  margin: -0.6em 0 1.1em;
+  font-family: var(--doc-sans);
+  font-size: 0.74rem;
+  line-height: 1.6;
+  color: var(--doc-faint);
+}
+
+.doc-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ------------------------------------------------------- sentence layers */
+.doc-text {
+  display: inline;
+}
+
+.doc-sent-zh {
+  font-family: var(--doc-serif);
+}
+
+/* The Chinese sentence that hides its English original. */
+.doc-sent-interactive {
+  padding: 0 0.08em;
+  border-radius: 3px;
+  cursor: help;
+  outline: none;
+  transition: background-color 120ms ease;
+}
+
+.doc-sent-interactive:hover,
+.doc-sent-interactive:focus-visible {
+  background: var(--doc-accent-soft);
+}
+
+.doc-sent-interactive:focus-visible {
+  outline: 2px solid var(--doc-accent-border);
+  outline-offset: 1px;
+}
+
+/* Bilingual mode: the English source trails each Chinese sentence. */
+.doc-sent-en {
+  margin-left: 0.3em;
+  color: var(--doc-muted);
+  font-size: 0.92em;
+}
+
+.doc-pair + .doc-pair {
+  margin-left: 0.2em;
+}
+
+/* A sentence the translator has not reached yet: the original plus a hint. */
+.doc-sent-untranslated {
+  color: var(--doc-muted);
+}
+
+.doc-untranslated-badge {
+  display: inline-block;
+  margin-left: 0.3em;
+  padding: 0 0.32em;
+  border: 1px solid var(--doc-border);
+  border-radius: 4px;
+  background: var(--doc-surface-alt);
+  color: var(--doc-faint);
+  font-family: var(--doc-sans);
+  font-size: 0.62rem;
+  line-height: 1.55;
+  vertical-align: 0.08em;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------- citation */
+.doc-cite,
+.doc-cite-static {
+  position: relative;
+  z-index: 65; /* stays above .doc-tip (60), so a marker is never hidden */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.15em;
+  height: 1.15em;
+  margin: 0 0.08em;
+  padding: 0 0.28em;
+  border: 1px solid var(--doc-cite-border);
+  border-radius: 4px;
+  background: var(--doc-cite-bg);
+  color: var(--doc-cite-fg);
+  font-family: var(--doc-sans);
+  font-size: 0.64em;
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: 0.35em;
+  transition: background-color 120ms ease;
+}
+
+.doc-cite {
+  cursor: pointer;
+}
+
+.doc-cite:hover {
+  background: var(--doc-accent-border);
+}
+
+.doc-cite:focus-visible {
+  outline: 2px solid var(--doc-accent);
+  outline-offset: 1px;
+}
+
+.doc-cite-static {
+  cursor: default;
+}
+
+/* ----------------------------------------------------------------- tooltip
+   Portalled to <body> (so no transformed ancestor can trap it) and driven by
+   inline coordinates.  It never intercepts the pointer: a citation under the
+   tooltip stays clickable, which is why the bubble may overlap the line. */
+.doc-tip {
+  position: fixed;
+  z-index: 60;
+  max-width: min(34rem, calc(100vw - 24px));
+  padding: 0.6rem 0.8rem;
+  border-radius: 12px;
+  background: rgba(19, 27, 38, 0.96);
+  color: #f5f2ec;
+  font-family: var(--doc-sans);
+  font-size: 0.82rem;
+  line-height: 1.6;
+  text-align: left;
+  box-shadow: 0 18px 40px rgba(19, 27, 38, 0.28);
+  pointer-events: none;
+}
+
+.doc-tip-label {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: #ffc471;
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* ----------------------------------------------------------------- caption */
+.doc-caption {
+  display: block;
+  font-family: var(--doc-sans);
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.6;
+  color: var(--doc-fg);
+}
+
+.doc-caption-en {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.74rem;
+  font-weight: 400;
+  font-style: italic;
+  color: var(--doc-muted);
+}
+
+.doc-caption-zh {
+  display: block;
+}
+
+.doc-caption-en-primary {
+  display: inline;
+  margin-top: 0;
+  font-size: inherit;
+  font-style: normal;
+  color: inherit;
+}
+
+/* ------------------------------------------------------------------ figure */
+.doc-figure {
+  margin: 1.6rem 0;
+  padding: 0.9rem;
+  border: 1px solid var(--doc-border);
+  border-radius: 12px;
+  background: var(--doc-surface);
+}
+
+.doc-figure-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+  border-radius: 6px;
+}
+
+.doc-figure > .doc-caption {
+  margin-top: 0.7rem;
+}
+
+.doc-figure-missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 5rem;
+  padding: 0.75rem;
+  border: 1px dashed var(--doc-border);
+  border-radius: 8px;
+  font-family: var(--doc-sans);
+  font-size: 0.74rem;
+  color: var(--doc-faint);
+  text-align: center;
+}
+
+/* ------------------------------------------------------------------- table */
+.doc-table {
+  margin: 1.6rem 0;
+}
+
+.doc-table-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.doc-table-caption {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.doc-toggle {
+  flex: 0 0 auto;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--doc-border);
+  border-radius: 999px;
+  background: var(--doc-surface-alt);
+  color: var(--doc-muted);
+  font-family: var(--doc-sans);
+  font-size: 0.7rem;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+
+.doc-toggle:hover {
+  color: var(--doc-accent);
+  border-color: var(--doc-accent-border);
+}
+
+.doc-toggle[aria-pressed='true'] {
+  background: var(--doc-cite-bg);
+  border-color: var(--doc-cite-border);
+  color: var(--doc-cite-fg);
+}
+
+.doc-toggle:focus-visible {
+  outline: 2px solid var(--doc-accent);
+  outline-offset: 1px;
+}
+
+/* Horizontal scroll is contained here: a wide table never widens the page. */
+.doc-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid var(--doc-border);
+  border-radius: 10px;
+  background: var(--doc-surface);
+}
+
+.doc-table-scroll:focus-visible {
+  outline: 2px solid var(--doc-accent);
+  outline-offset: 2px;
+}
+
+.doc-table-grid {
+  width: 100%;
+  min-width: max-content; /* keeps the printed columns instead of crushing them */
+  border-collapse: collapse;
+  font-family: var(--doc-sans);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.doc-table-grid th,
+.doc-table-grid td {
+  padding: 0.42rem 0.65rem;
+  border-right: 1px solid var(--doc-border-soft);
+  border-bottom: 1px solid var(--doc-border-soft);
+  text-align: left;
+  vertical-align: top;
+}
+
+.doc-table-grid th {
+  background: var(--doc-surface-alt);
+  color: var(--doc-fg-strong);
+  font-weight: 600;
+}
+
+/* The last header row closes the header band with a firmer rule. */
+.doc-table-row-header th {
+  border-bottom: 1.5px solid var(--doc-border);
+}
+
+/* A row whose cells were all absorbed by a rowspan above still has to exist,
+   otherwise the merge has nothing to grow into and the grid shifts up. */
+.doc-table-row-spacer {
+  height: 0;
+}
+
+.doc-table-grid tr:last-child th,
+.doc-table-grid tr:last-child td {
+  border-bottom: none;
+}
+
+.doc-table-grid th:last-child,
+.doc-table-grid td:last-child {
+  border-right: none;
+}
+
+.doc-cell-en {
+  display: block;
+  margin-top: 0.1rem;
+  color: var(--doc-muted);
+  font-size: 0.9em;
+  font-style: italic;
+}
+
+.doc-table-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--doc-border);
+  border-radius: 10px;
+  background: var(--doc-surface);
+}
+
+/* ----------------------------------------------------------------- formula */
+.doc-formula {
+  margin: 1.4rem 0;
+}
+
+.doc-formula-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--doc-border);
+  border-radius: 12px;
+  background: var(--doc-surface);
+}
+
+.doc-formula-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.doc-formula-rendered {
+  font-size: 1.02em;
+}
+
+/* KaTeX's own display margins would double the box padding. */
+.doc-formula-rendered .katex-display {
+  margin: 0;
+}
+
+.doc-formula-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.doc-formula-number {
+  flex: 0 0 auto;
+  font-family: var(--doc-mono);
+  font-size: 0.8rem;
+  color: var(--doc-muted);
+}
+
+.doc-formula-raw {
+  font-family: var(--doc-mono);
+  font-size: 0.78rem;
+  color: var(--doc-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* --------------------------------------------------------------- narrow view */
+@media (max-width: 640px) {
+  .doc-view {
+    font-size: 1rem;
+  }
+
+  .doc-title {
+    font-size: 1.3rem;
+  }
+
+  .doc-block {
+    column-gap: 0.4rem;
+  }
+
+  .doc-figure,
+  .doc-formula-row {
+    padding: 0.7rem;
+  }
+
+  .doc-table-grid {
+    font-size: 0.78rem;
+  }
+}

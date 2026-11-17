@@ -6,6 +6,8 @@
  * identically.
  */
 
+import type { PaperDocument } from './document'
+
 const BASE = import.meta.env.VITE_API_BASE ?? '/api'
 
 /* ------------------------------------------------------------------ types */
@@ -430,6 +432,12 @@ export const api = {
       cached: boolean
       failed?: number
     }>(`/reader/${paperId}/translation?target_lang=${targetLang}`),
+  /**
+   * The re-laid-out document: paragraphs, tables, figures and formulas in
+   * reading order, with the translation already attached to each sentence.
+   */
+  document: (paperId: string, lang = 'zh') =>
+    request<PaperDocument>(`/reader/${paperId}/document?lang=${lang}`),
   startTranslation: (paperId: string, targetLang = 'zh') =>
     request<{
       status: 'started' | 'running' | 'ready' | 'error'
