@@ -440,11 +440,9 @@ export default function Reader() {
   const [activeRef, setActiveRef] = useState<number | null>(null)
   const [translation, setTranslation] = useState<TranslationState>(IDLE_TRANSLATION)
   const [tip, setTip] = useState<{ text: string; top: number; left: number } | null>(null)
-  // The re-laid-out reading view is the default: the paper is rebuilt from the
-  // parsed blocks so that tables become real tables and formulas are typeset
-  // instead of shown as pictures of themselves.  'layout' keeps the faithful
-  // rendering of the original typesetting.
-  const [viewMode, setViewMode] = useState<'reflow' | 'layout'>('reflow')
+  // The paper is rendered from its parsed structure: tables become real
+  // tables and formulas are typeset, instead of being shown as pictures of
+  // themselves.
   const [paperDoc, setPaperDoc] = useState<PaperDocument | null>(null)
   const [docState, setDocState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
 
@@ -452,7 +450,7 @@ export default function Reader() {
 
   /* ------------------------------------------------------- document view */
   useEffect(() => {
-    if (!id || viewMode !== 'reflow') return
+    if (!id) return
     let cancelled = false
     setDocState('loading')
     ;(async () => {
@@ -463,17 +461,16 @@ export default function Reader() {
         setDocState('ready')
       } catch {
         if (cancelled) return
-        // The re-laid-out view needs the backend endpoint; when it is absent
-        // the reader falls back to the faithful layout instead of erroring.
+        // The endpoint can be missing on an older backend; the reader then
+        // shows the block rendering of the parsed paper instead of erroring.
         setPaperDoc(null)
         setDocState('error')
-        setViewMode('layout')
       }
     })()
     return () => {
       cancelled = true
     }
-  }, [id, viewMode, mode])
+  }, [id, mode])
 
   /* --------------------------------------------------------------- load */
   useEffect(() => {
@@ -660,15 +657,6 @@ export default function Reader() {
             value={mode}
             onChange={switchMode}
           />
-          <span className="mx-1 h-5 w-px bg-ink-200 dark:bg-ink-700" />
-          <Tabs
-            tabs={[
-              { id: 'reflow' as const, label: '重排' },
-              { id: 'layout' as const, label: '原版式' },
-            ]}
-            value={viewMode}
-            onChange={setViewMode}
-          />
         </div>
       </header>
 
@@ -749,12 +737,12 @@ export default function Reader() {
                 hint="该文献尚未解析出章节结构，可能仍在解析中。"
               />
             </div>
-          ) : viewMode === 'reflow' && docState === 'loading' ? (
+          ) : docState === 'loading' ? (
             <div className="flex h-full items-center justify-center gap-2 text-ink-400">
               <Spinner className="h-5 w-5" />
-              <span className="font-sans text-sm">正在重排文档…</span>
+              <span className="font-sans text-sm">正在排版…</span>
             </div>
-          ) : viewMode === 'reflow' && paperDoc ? (
+          ) : paperDoc ? (
             <div className="doc-scroll mx-auto w-full max-w-[1000px] px-4 py-6 sm:px-8">
               <DocumentView
                 doc={paperDoc}
