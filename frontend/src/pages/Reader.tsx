@@ -578,6 +578,8 @@ export default function Reader() {
     label: string
     text: string
     refId?: string
+    /** the citation number or `surname|year`, used when the id is missing */
+    key: string
   } | null>(null)
 
   const openCitation = useCallback(
@@ -587,49 +589,80 @@ export default function Reader() {
       )
       if (marker.startsWith('ay:')) {
         const [surname, year] = marker.slice(3).split('|')
-        // A bibliography entry starts with its authors and carries the year
-        // early on, so both are looked for in the head of the entry only —
-        // a bare search anywhere would match a cited name in the title.
+        // The surname and the year have to sit close together, otherwise a name
+        // that appears in some other entry's title would match.
         const hit = references.find((block) => {
           const text = (block.text ?? '').toLowerCase()
-          const head = text.slice(0, 90)
-          return head.includes(surname) && text.slice(0, 140).includes(year)
+          const at = text.indexOf(surname)
+          if (at < 0 || at > 150) return false
+          const yearAt = text.indexOf(year, Math.max(0, at - 60))
+          return yearAt >= 0 && yearAt <= at + 90
         })
         setCiteCard({
           label: `${surname} ${year}`,
-          text: hit?.text ?? '这条引用在参考文献里没有找到对应的条目',
+          text: hit?.text
+            ?? `本文的参考文献里没有解析到 ${surname} ${year} 这一条，所以无法定位`,
           refId: hit?.id,
+          key: `${surname}|${year}`,
         })
         return
       }
       const n = String(marker).split(/[,;\s-]/)[0]
       const fromDocument = references.find((block) => block.number === n)
       if (fromDocument) {
-        setCiteCard({ label: `[${n}]`, text: fromDocument.text ?? '', refId: fromDocument.id })
+        setCiteCard({
+          label: `[${n}]`,
+          text: fromDocument.text ?? '',
+          refId: fromDocument.id,
+          key: n,
+        })
         return
       }
       if (!id) return
       api
         .reference(id, Number.parseInt(n, 10))
         .then((ref) =>
-          setCiteCard({ label: `[${n}]`, text: String(ref.raw_text ?? '') }),
+          setCiteCard({ label: `[${n}]`, text: String(ref.raw_text ?? ''), key: n }),
         )
         .catch(() => setToast(`文献库中没有 [${n}] 这一条`))
     },
     [id, paperDoc],
   )
 
-  const scrollToReference = (target: { refId?: string; label: string }) => {
-    const el = target.refId
-      ? document.getElementById(target.refId)
-      : document.querySelector<HTMLElement>(`[data-cite="${target.label}"]`)
-    if (!el) {
-      setToast(`参考文献里没有 ${target.label}`)
-      return
-    }
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    el.classList.add('doc-reference-hit')
-    window.setTimeout(() => el.classList.remove('doc-reference-hit'), 1600)
+  /**
+   * Scroll the citation card's target into view.
+   *
+   * The reader scrolls inside its own `<section>`, not the window, and the card
+   * is still mounted when the button is pressed — so the modal is closed first,
+   * then the container is scrolled by hand from the measured rectangles.  That
+   * works whatever the scroll container turns out to be.
+   */
+  const scrollToReference = (card: { refId?: string; label: string; key: string }) => {
+    setCiteCard(null)
+    window.setTimeout(() => {
+      const byId = card.refId ? document.getElementById(card.refId) : null
+      const byNumber = Array.from(
+        document.querySelectorAll<HTMLElement>('.doc-reference'),
+      ).find((node) => node.dataset.cite === card.key)
+      const el = byId ?? byNumber
+      if (!el) {
+        setToast(`参考文献里没有 ${card.label}`)
+        return
+      }
+      const scroller = el.closest<HTMLElement>('.scroll-thin')
+      if (scroller) {
+        const rect = el.getBoundingClientRect()
+        const box = scroller.getBoundingClientRect()
+        const top =
+          scroller.scrollTop + (rect.top - box.top) - scroller.clientHeight / 2 + rect.height / 2
+        scroller.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+      } else {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+      el.classList.add('doc-reference-hit')
+      window.setTimeout(() => el.classList.remove('doc-reference-hit'), 1600)
+      setToast(`已定位到 ${card.label}`)
+    }, 90)
   }
 
   const jumpToReference = async (n: number) => {
@@ -911,18 +944,21 @@ export default function Reader() {
             <p className="max-h-64 overflow-y-auto font-serif text-sm leading-relaxed text-ink-700 dark:text-parchment-200">
               {citeCard.text || '这条引用没有可显示的文本'}
             </p>
+            {!citeCard.refId && (
+              <p className="text-[12px] leading-relaxed text-amber-700 dark:text-amber-400">
+                这一条没有对应的列表项，所以不能跳转。本文的参考文献表可能没有解析完整。
+              </p>
+            )}
             <div className="flex justify-end gap-2">
               <button className="btn-secondary !py-1 !text-[12px]" onClick={() => setCiteCard(null)}>
                 关闭
               </button>
               <button
-                className="btn-primary !py-1 !text-[12px]"
-                onClick={() => {
-                  scrollToReference(citeCard)
-                  setCiteCard(null)
-                }}
+                className="btn-primary !py-1 !text-[12px] disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={!citeCard.refId}
+                onClick={() => scrollToReference(citeCard)}
               >
-                跳到参考文献
+                {citeCard.refId ? '跳到参考文献' : '无法定位'}
               </button>
             </div>
           </div>
