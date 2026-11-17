@@ -1,13 +1,16 @@
 /**
- * Module 3 — the layout-aware reader.
+ * Module 3 — the reading surface.
  *
- * Three panes:
- *   1. the heading tree (levels 1/2/3) for fast navigation;
- *   2. the original document (rendered page images, faithful to the print
- *      layout of the paper);
- *   3. the bilingual column, where the left side is the English source and the
- *      right side the Chinese translation — the two are **synchronously
- *      scrolled** because both render the same aligned segment list.
+ * One document model, two modes:
+ *
+ *   · 英文原文    the parsed document, English only;
+ *   · 中英对照    the same document with a Chinese translation layer.  Every
+ *                 Chinese sentence reveals the aligned English sentence on
+ *                 hover, so the translation never hides the source.
+ *
+ * The document is assembled from the parsed blocks (text), the figures and
+ * the tables, and ordered by their position on the page — a figure appears
+ * where it sits in the paper instead of in a list at the end.
  *
  * Citation markers ``[11]`` in the text jump to the bibliography entry, and
  * the bibliography entry can jump back to the sentence that cited it.
@@ -17,14 +20,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   api,
+  Block,
+  FigureItem,
+  FormulaItem,
   Paper,
   PaperStructure,
   ReferenceItem,
+  Section,
+  TableItem,
 } from '../lib/api'
 import { EmptyState, Modal, Spinner, Tabs, Toast } from '../components/ui'
 import { useSciStore } from '../store'
 
-type ViewMode = 'pages' | 'bilingual'
+type ViewMode = 'en' | 'zh'
 
 interface TranslationSegment {
   index: number
@@ -32,6 +40,8 @@ interface TranslationSegment {
   translation: string
   kind: string
   page_no: number
+  block_id?: string
+  block_order?: number
 }
 
 interface CitationMarker {
@@ -42,6 +52,367 @@ interface CitationMarker {
   numbers: number[]
   context: string
 }
+
+interface TranslationState {
+  status: 'idle' | 'running' | 'ready' | 'error'
+  progress: number
+  message: string
+  error: string
+}
+
+const IDLE_TRANSLATION: TranslationState = {
+  status: 'idle',
+  progress: 0,
+  message: '',
+  error: '',
+}
+
+/* ========================================================================== */
+/* helpers                                                                     */
+/* ========================================================================== */
+
+/** Join hard-wrapped PDF lines and repair hyphenated line breaks. */
+function normaliseProse(text: string): string {
+  if (!text) return ''
+  return text
+    .replace(/\u00a0/g, ' ')
+    .replace(/(?<![-\w])([A-Za-z]{2,})-\n([a-z]{2,})/g, '$1$2')
+    .replace(/\s*\n\s*/g, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim()
+}
+
+function splitParagraphs(text: string): string[] {
+  return text
+    .split(/\n\s*\n/)
+    .map((p) => normaliseProse(p))
+    .filter((p) => p.length > 0)
+}
+
+function bboxTop(bbox?: number[]): number {
+  return bbox && bbox.length >= 2 ? bbox[1] : 0
+}
+
+/**
+ * Find the caption of a figure or a table.
+ *
+ * The parser classifies the caption paragraphs ("Figure 1: …", "Table 2: …")
+ * as their own block type, but the link between a caption and the object it
+ * describes is a matter of position on the page: a figure caption sits below
+ * the figure, a table caption above the table.  The backend's own caption
+ * field is used when it is filled in; otherwise the nearest caption block on
+ * the same page wins.
+ */
+function pickCaption(
+  media: { page_no: number; bbox?: number[]; caption?: string },
+  kind: 'figure' | 'table',
+  captions: Block[],
+): string {
+  const existing = (media.caption ?? '').trim()
+  if (existing) return existing
+
+  const top = media.bbox && media.bbox.length >= 2 ? media.bbox[1] : undefined
+  const bottom = media.bbox && media.bbox.length >= 4 ? media.bbox[3] : undefined
+  const wanted = kind === 'figure' ? /^(figure|fig\.)\s*\d+/i : /^table\s*\d+/i
+
+  let best: { text: string; distance: number } | null = null
+  for (const block of captions) {
+    if (block.page_no !== media.page_no) continue
+    const text = (block.content ?? '').trim()
+    if (!text || !wanted.test(text)) continue
+    const y0 = block.bbox && block.bbox.length >= 2 ? block.bbox[1] : 0
+    const y1 = block.bbox && block.bbox.length >= 4 ? block.bbox[3] : y0
+
+    let distance: number | null = null
+    if (kind === 'figure' && bottom !== undefined && y0 >= bottom - 8) {
+      distance = y0 - bottom
+    } else if (kind === 'table' && top !== undefined && y1 <= top + 8) {
+      distance = top - y1
+    }
+    if (distance === null || distance > 160) continue
+    if (!best || distance < best.distance) best = { text, distance }
+  }
+  return best?.text ?? ''
+}
+
+/**
+ * The number of an equation ("(1)"), taken from the LaTeX tag or from the
+ * number the PDF prints at the right margin.
+ *
+ * A display equation that spans several lines carries its number in the
+ * middle of the block, so the last number of the text is used when the text
+ * does not end with one.
+ */
+function equationNumber(formula: FormulaItem): string {
+  const tag = formula.latex?.match(/\\tag\{([^}]*)\}/)
+  if (tag) return tag[1]
+  const text = formula.raw_text ?? ''
+  const tail = text.match(/\((\d{1,2}[a-z]?)\)\s*$/)
+  if (tail) return tail[1]
+  const anywhere = [...text.matchAll(/\((\d{1,2}[a-z]?)\)/g)]
+  if (anywhere.length) return anywhere[anywhere.length - 1][1]
+  return ''
+}
+
+/* ========================================================================== */
+/* the document model                                                          */
+/* ========================================================================== */
+
+type DocItem =
+  | { kind: 'heading'; key: string; section: Section; page_no: number; top: number }
+  | {
+      kind: 'paragraph'
+      key: string
+      page_no: number
+      top: number
+      text: string
+      segments: TranslationSegment[]
+    }
+  | { kind: 'figure'; key: string; page_no: number; top: number; figure: FigureItem }
+  | { kind: 'table'; key: string; page_no: number; top: number; table: TableItem }
+  | { kind: 'formula'; key: string; page_no: number; top: number; formula: FormulaItem }
+
+interface DocModel {
+  sections: { section: Section; items: DocItem[] }[]
+  footnotes: { page_no: number; text: string }[]
+  preamble: DocItem[]
+}
+
+/** The section a page (or a block) belongs to: the last one that starts there. */
+function sectionForPage(sections: Section[], page: number): Section | undefined {
+  let found: Section | undefined
+  for (const section of sections) {
+    const start = section.page_start ?? section.page_no ?? 0
+    if (start <= page) found = section
+    else break
+  }
+  return found ?? sections[0]
+}
+
+function buildDocument(
+  structure: PaperStructure | null,
+  segments: TranslationSegment[],
+): DocModel {
+  const sections = [...(structure?.sections ?? [])].sort(
+    (a, b) => (a.order_index ?? 0) - (b.order_index ?? 0),
+  )
+  const blocks = structure?.blocks ?? []
+  // The title of the paper is printed on the first page and is parsed as a
+  // heading of its own.  The masthead already shows it, so the duplicate is
+  // dropped here.
+  const paperTitle = normaliseProse(structure?.title ?? '').toLowerCase()
+
+  // One English/Chinese pairing per sentence, grouped by the block it came from.
+  const byBlock = new Map<string, TranslationSegment[]>()
+  for (const segment of segments) {
+    if (!segment.block_id) continue
+    const list = byBlock.get(segment.block_id)
+    if (list) list.push(segment)
+    else byBlock.set(segment.block_id, [segment])
+  }
+
+  const footnotes: { page_no: number; text: string }[] = []
+  const proseBlocks: Block[] = []
+
+  // The captions of the figures and the tables are shown with the object they
+  // belong to.  The caption block must not become a paragraph as well, or the
+  // text of the paper would repeat every caption.
+  const captionBlocks = blocks.filter((block) => (block.type || '').toLowerCase() === 'caption')
+  const media: DocItem[] = [
+    ...(structure?.figures ?? []).map((figure) => ({
+      kind: 'figure' as const,
+      key: figure.id,
+      page_no: figure.page_no,
+      top: bboxTop(figure.bbox),
+      figure: { ...figure, caption: pickCaption(figure, 'figure', captionBlocks) },
+    })),
+    ...(structure?.tables ?? []).map((table) => ({
+      kind: 'table' as const,
+      key: table.id,
+      page_no: table.page_no,
+      top: bboxTop(table.bbox),
+      table: { ...table, caption: pickCaption(table, 'table', captionBlocks) },
+    })),
+    // A display equation is shown as the typeset image of the equation: the
+    // extracted text of a formula is flattened and unreadable.
+    ...(structure?.formulas ?? []).map((formula) => ({
+      kind: 'formula' as const,
+      key: formula.id,
+      page_no: formula.page_no,
+      top: bboxTop(formula.bbox),
+      formula,
+    })),
+  ]
+  const usedCaptions = new Set<string>()
+  for (const item of media) {
+    const caption =
+      item.kind === 'figure' ? item.figure.caption : item.kind === 'table' ? item.table.caption : ''
+    const text = normaliseProse(caption ?? '').toLowerCase()
+    if (text) usedCaptions.add(text)
+  }
+
+  // The parser labels every block: ``body`` is running prose, ``text`` is a
+  // short fragment (a table cell, a page number) that must not become a
+  // paragraph of its own.  Older data has no labels at all, in which case
+  // everything that is not excluded is treated as prose.
+  const typed = blocks.some((block) => (block.type || '').toLowerCase() === 'body')
+  for (const block of blocks) {
+    const type = (block.type || '').toLowerCase()
+    if (type === 'footnote') {
+      const text = normaliseProse(block.content)
+      if (text) footnotes.push({ page_no: block.page_no, text })
+      continue
+    }
+    // Figure labels and running headers are not part of the prose.
+    if (type === 'figure_label' || type === 'header') continue
+    if (typed && type !== 'body' && type !== 'caption') continue
+    // The title of the paper is not a paragraph of the paper.
+    const text = normaliseProse(block.content)
+    if (paperTitle && text.toLowerCase() === paperTitle) continue
+    // A caption that belongs to a figure or a table is shown with it.
+    if (usedCaptions.has(text.toLowerCase())) continue
+    proseBlocks.push(block)
+  }
+
+  // Fall back to the section blobs when the backend has no block stream.
+  if (!blocks.length) {
+    const items: DocItem[] = []
+    for (const section of sections) {
+      for (const paragraph of splitParagraphs(section.content ?? '')) {
+        items.push({
+          kind: 'paragraph',
+          key: `${section.id}-${items.length}`,
+          page_no: section.page_no ?? 0,
+          top: 0,
+          text: paragraph,
+          segments: [],
+        })
+      }
+    }
+    const figures = (structure?.figures ?? []).map((figure) => ({
+      kind: 'figure' as const,
+      key: figure.id,
+      page_no: figure.page_no,
+      top: bboxTop(figure.bbox),
+      figure,
+    }))
+    const tables = (structure?.tables ?? []).map((table) => ({
+      kind: 'table' as const,
+      key: table.id,
+      page_no: table.page_no,
+      top: bboxTop(table.bbox),
+      table,
+    }))
+    const formulas = (structure?.formulas ?? []).map((formula) => ({
+      kind: 'formula' as const,
+      key: formula.id,
+      page_no: formula.page_no,
+      top: bboxTop(formula.bbox),
+      formula,
+    }))
+    const first = sections[0]
+    // No sections at all: there is no document to lay out.
+    if (!first) {
+      return { sections: [], footnotes, preamble: [...items, ...figures, ...tables, ...formulas] }
+    }
+    return {
+      sections: [{ section: first, items: [...items, ...figures, ...tables, ...formulas] }],
+      footnotes,
+      preamble: [],
+    }
+  }
+
+  // Group the blocks by their section.
+  const blocksBySection = new Map<string, Block[]>()
+  const orphans: Block[] = []
+  for (const block of proseBlocks) {
+    const section = block.section_id
+      ? sections.find((s) => s.id === block.section_id)
+      : sectionForPage(sections, block.page_no)
+    if (!section) {
+      orphans.push(block)
+      continue
+    }
+    const list = blocksBySection.get(section.id)
+    if (list) list.push(block)
+    else blocksBySection.set(section.id, [block])
+  }
+
+  // Figures and tables belong to the section that is open on their page.
+  const mediaBySection = new Map<string, DocItem[]>()
+  for (const item of media) {
+    const section = sectionForPage(sections, item.page_no)
+    if (!section) {
+      orphans.push(item as unknown as Block)
+      continue
+    }
+    const list = mediaBySection.get(section.id)
+    if (list) list.push(item)
+    else mediaBySection.set(section.id, [item])
+  }
+
+  const out: DocModel['sections'] = []
+  for (const section of sections) {
+    // The title of the paper opens a section of its own; the masthead shows
+    // it already.
+    if (paperTitle && normaliseProse(section.title ?? '').toLowerCase() === paperTitle) {
+      continue
+    }
+    const items: DocItem[] = [
+      {
+        kind: 'heading',
+        key: `h-${section.id}`,
+        section,
+        page_no: section.page_start ?? section.page_no ?? 0,
+        top: bboxTop(section.bbox),
+      },
+      ...(blocksBySection.get(section.id) ?? []).map((block) => ({
+        kind: 'paragraph' as const,
+        key: block.id,
+        page_no: block.page_no,
+        top: bboxTop(block.bbox),
+        text: normaliseProse(block.content),
+        segments: byBlock.get(block.id) ?? [],
+      })),
+      ...(mediaBySection.get(section.id) ?? []),
+    ]
+    items.sort((a, b) => {
+      if (a.kind === 'heading') return -1
+      if (b.kind === 'heading') return 1
+      if (a.page_no !== b.page_no) return a.page_no - b.page_no
+      return a.top - b.top
+    })
+    out.push({ section, items })
+  }
+
+  // A section that carries no visible content is dropped: the paper title
+  // becomes a heading of its own, and the bibliography entries are rendered
+  // in the sidebar instead of the body.
+  const filled = out.filter(({ items }) => items.some((item) => item.kind !== 'heading'))
+
+  // Blocks that no heading owns (the text before the first heading) are shown
+  // ahead of the sections rather than dropped.
+  const preamble: DocItem[] = orphans.map((entry, i) => {
+    const anyEntry = entry as unknown as Partial<DocItem> & Block
+    if (anyEntry.kind === 'figure' || anyEntry.kind === 'table' || anyEntry.kind === 'formula') {
+      return { ...anyEntry, key: `${anyEntry.kind}-${i}` } as DocItem
+    }
+    return {
+      kind: 'paragraph' as const,
+      key: entry.id,
+      page_no: entry.page_no,
+      top: bboxTop(entry.bbox),
+      text: normaliseProse(entry.content),
+      segments: byBlock.get(entry.id) ?? [],
+    }
+  })
+
+  return { sections: filled, footnotes, preamble }
+}
+
+/* ========================================================================== */
+/* the page                                                                    */
+/* ========================================================================== */
 
 export default function Reader() {
   const { paperId } = useParams<{ paperId: string }>()
@@ -57,18 +428,14 @@ export default function Reader() {
   const [markers, setMarkers] = useState<CitationMarker[]>([])
   const [references, setReferences] = useState<ReferenceItem[]>([])
   const [segments, setSegments] = useState<TranslationSegment[]>([])
-  const [mode, setMode] = useState<ViewMode>('pages')
+  const [mode, setMode] = useState<ViewMode>('en')
   const [loading, setLoading] = useState(false)
-  const [translating, setTranslating] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [activeRef, setActiveRef] = useState<number | null>(null)
-  const [selection, setSelection] = useState<{ text: string; x: number; y: number } | null>(null)
-  const [translated, setTranslated] = useState<string | null>(null)
+  const [translation, setTranslation] = useState<TranslationState>(IDLE_TRANSLATION)
+  const [tip, setTip] = useState<{ text: string; top: number; left: number } | null>(null)
 
-  const srcPane = useRef<HTMLDivElement>(null)
-  const tgtPane = useRef<HTMLDivElement>(null)
-  const lockRef = useRef<'src' | 'tgt' | null>(null)
-  const lockTimer = useRef<number | null>(null)
+  const pollTimer = useRef<number | null>(null)
 
   /* --------------------------------------------------------------- load */
   useEffect(() => {
@@ -94,53 +461,79 @@ export default function Reader() {
     })()
   }, [id, setActivePaper])
 
-  /* --------------------------------------------------- bilingual loading */
+  useEffect(() => () => {
+    if (pollTimer.current) window.clearInterval(pollTimer.current)
+  }, [])
+
+  /* ------------------------------------------------------- translation */
   const loadTranslation = useCallback(async () => {
     if (!id) return
-    setTranslating(true)
+    if (pollTimer.current) window.clearInterval(pollTimer.current)
+    setTranslation({ status: 'running', progress: 0, message: '正在准备段落…', error: '' })
     try {
-      const res = await api.translation(id, 'zh')
-      setSegments(res.segments)
-      setMode('bilingual')
+      const started = await api.startTranslation(id, 'zh')
+      if (started.status === 'ready') {
+        setSegments(started.segments ?? [])
+        setTranslation({
+          status: 'ready',
+          progress: 1,
+          message: started.failed ? `译文已就绪，${started.failed} 句未翻译` : '译文已就绪',
+          error: '',
+        })
+        return
+      }
+      pollTimer.current = window.setInterval(() => {
+        void (async () => {
+          try {
+            const state = await api.translation(id, 'zh')
+            if (state.status === 'ready') {
+              if (pollTimer.current) window.clearInterval(pollTimer.current)
+              setSegments(state.segments ?? [])
+              setTranslation({
+                status: 'ready',
+                progress: 1,
+                message: state.failed ? `译文已就绪，${state.failed} 句未翻译` : '译文已就绪',
+                error: '',
+              })
+            } else if (state.status === 'error') {
+              if (pollTimer.current) window.clearInterval(pollTimer.current)
+              setTranslation({
+                status: 'error',
+                progress: 0,
+                message: state.message ?? '',
+                error: state.error ?? '翻译失败',
+              })
+            } else {
+              setTranslation({
+                status: 'running',
+                progress: state.progress ?? 0,
+                message: state.message ?? '翻译中…',
+                error: '',
+              })
+            }
+          } catch (err) {
+            if (pollTimer.current) window.clearInterval(pollTimer.current)
+            setTranslation({
+              status: 'error',
+              progress: 0,
+              message: '',
+              error: (err as Error).message,
+            })
+          }
+        })()
+      }, 1500)
     } catch (err) {
-      setToast(`翻译失败：${(err as Error).message}`)
-    } finally {
-      setTranslating(false)
+      setTranslation({ status: 'error', progress: 0, message: '', error: (err as Error).message })
     }
   }, [id])
 
-  /* ------------------------------------------------------- sync scrolling */
-  const syncScroll = useCallback((from: 'src' | 'tgt') => {
-    if (lockRef.current && lockRef.current !== from) return
-    const src = srcPane.current
-    const tgt = tgtPane.current
-    if (!src || !tgt) return
-
-    lockRef.current = from
-    if (lockTimer.current) window.clearTimeout(lockTimer.current)
-    lockTimer.current = window.setTimeout(() => {
-      lockRef.current = null
-    }, 120)
-
-    const fromEl = from === 'src' ? src : tgt
-    const toEl = from === 'src' ? tgt : src
-
-    // Find the first segment that is visible in the source pane and align the
-    // target pane to the same segment (both panes share the segment list).
-    const items = Array.from(fromEl.querySelectorAll<HTMLElement>('[data-seg]'))
-    if (!items.length) return
-    const fromTop = fromEl.scrollTop
-    let active = items[0]
-    for (const el of items) {
-      if (el.offsetTop - fromEl.offsetTop <= fromTop + 24) active = el
-      else break
-    }
-    const index = active.dataset.seg
-    const counterpart = toEl.querySelector<HTMLElement>(`[data-seg="${index}"]`)
-    if (!counterpart) return
-    const delta = active.offsetTop - counterpart.offsetTop
-    toEl.scrollTop = Math.max(0, toEl.scrollTop + delta)
-  }, [])
+  const switchMode = useCallback(
+    (next: ViewMode) => {
+      setMode(next)
+      if (next === 'zh' && translation.status !== 'ready') void loadTranslation()
+    },
+    [loadTranslation, translation.status],
+  )
 
   /* -------------------------------------------------- citation navigation */
   const jumpToReference = async (n: number) => {
@@ -148,7 +541,6 @@ export default function Reader() {
     const ref = await api.reference(id!, n)
     const marker = markers.find((m) => m.numbers.includes(n))
     if (marker) {
-      // Highlight the first citation site in the text.
       const el = document.querySelector<HTMLElement>(`[data-cite="${n}"]`)
       el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     } else {
@@ -166,40 +558,21 @@ export default function Reader() {
     }
   }
 
-  /* ---------------------------------------------------------- selection */
-  useEffect(() => {
-    const handler = () => {
-      const sel = window.getSelection()
-      if (!sel || sel.isCollapsed || !sel.toString().trim()) {
-        setSelection(null)
-        return
-      }
-      const rect = sel.getRangeAt(0).getBoundingClientRect()
-      setSelection({ text: sel.toString().trim(), x: rect.left, y: rect.top })
-    }
-    document.addEventListener('mouseup', handler)
-    return () => document.removeEventListener('mouseup', handler)
-  }, [])
-
-  const translateSelection = async () => {
-    if (!selection) return
-    try {
-      const res = await api.translateText(selection.text, 'zh')
-      setTranslated(res.translation)
-    } catch (err) {
-      setToast(`翻译失败：${(err as Error).message}`)
-    }
-  }
-
   /* ------------------------------------------------------------- render */
-  const headingTree = useMemo(() => structure?.sections ?? [], [structure])
+  const doc = useMemo(() => buildDocument(structure, segments), [structure, segments])
+  // The outline follows the document: a heading that carries no content is
+  // not worth a line in the tree.
+  const outline = useMemo(
+    () => doc.sections.map((s) => s.section).filter((s): s is Section => Boolean(s)),
+    [doc],
+  )
 
   if (!id) {
     return (
       <div className="flex h-full items-center justify-center">
         <EmptyState
           title="尚未选择文献"
-          hint="请先在文献库中选择一篇论文，或直接上传新的 PDF。"
+          hint="请先在文献库中选择一篇文献，或直接上传新的 PDF。"
           action={
             <button className="btn-primary mt-2" onClick={() => navigate('/library')}>
               去文献库
@@ -222,19 +595,33 @@ export default function Reader() {
             <span>{paper?.page_count ?? 0} 页</span>
             {paper?.is_scanned && <span className="text-accent-600">扫描件 · VLM OCR</span>}
             {paper?.arxiv_id && <span>arXiv:{paper.arxiv_id}{paper.version_label}</span>}
-            <span className="truncate">{paper?.metadata?.columns as string}</span>
+            {paper?.year && <span>{paper.year}</span>}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {mode === 'zh' && translation.status === 'running' && (
+            <span className="chip border-accent-300 bg-accent-50 text-accent-700 dark:border-accent-700 dark:bg-accent-900/40 dark:text-accent-300">
+              <Spinner className="h-3 w-3" />
+              {translation.message || '翻译中…'}
+              {translation.progress > 0 && ` ${Math.round(translation.progress * 100)}%`}
+            </span>
+          )}
+          {mode === 'zh' && translation.status === 'error' && (
+            <span className="chip border-red-300 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
+              翻译失败：{translation.error}
+              <button className="ml-1 underline" onClick={() => void loadTranslation()}>
+                重试
+              </button>
+            </span>
+          )}
           <Tabs
             tabs={[
-              { id: 'pages' as ViewMode, label: '原文版式' },
-              { id: 'bilingual' as ViewMode, label: '中英对照' },
+              { id: 'en' as ViewMode, label: '英文原文' },
+              { id: 'zh' as ViewMode, label: '中英对照' },
             ]}
             value={mode}
-            onChange={(m) => (m === 'bilingual' ? void loadTranslation() : setMode(m))}
+            onChange={switchMode}
           />
-          {mode === 'bilingual' && translating && <Spinner className="text-ink-400" />}
         </div>
       </header>
 
@@ -250,11 +637,11 @@ export default function Reader() {
           <div className="mb-2 px-1 font-sans text-[11px] font-semibold uppercase tracking-wider text-ink-400">
             标题树
           </div>
-          {headingTree.length === 0 && (
+          {outline.length === 0 && (
             <div className="px-1 font-sans text-xs text-ink-400">未解析出标题层级</div>
           )}
           <ul className="space-y-0.5">
-            {headingTree.map((s) => (
+            {outline.map((s) => (
               <li key={s.id}>
                 <button
                   onClick={() => {
@@ -280,7 +667,7 @@ export default function Reader() {
           {references.length > 0 && (
             <>
               <div className="mb-2 mt-5 px-1 font-sans text-[11px] font-semibold uppercase tracking-wider text-ink-400">
-                References ({references.length})
+                参考文献 ({references.length})
               </div>
               <ul className="space-y-0.5">
                 {references.map((r) => (
@@ -300,22 +687,103 @@ export default function Reader() {
         </aside>
 
         {/* ------------------------------------------------------ document */}
-        <section className="min-w-0 flex-1 overflow-hidden">
+        <section className="scroll-thin min-w-0 flex-1 overflow-y-auto bg-parchment-100 dark:bg-ink-950">
           {loading ? (
             <div className="flex h-full items-center justify-center">
               <Spinner className="h-5 w-5 text-ink-400" />
             </div>
-          ) : mode === 'pages' ? (
-            <PagesView paperId={id} structure={structure} />
+          ) : doc.sections.length === 0 && doc.preamble.length === 0 ? (
+            <div className="flex h-full items-center justify-center">
+              <EmptyState
+                title="没有可显示的正文"
+                hint="该文献尚未解析出章节结构，可能仍在解析中。"
+              />
+            </div>
           ) : (
-            <BilingualView
-              segments={segments}
-              srcPane={srcPane}
-              tgtPane={tgtPane}
-              onScrollSrc={() => syncScroll('src')}
-              onScrollTgt={() => syncScroll('tgt')}
-              onCite={jumpToReference}
-            />
+            <article className="paper-sheet mx-auto max-w-[880px] px-8 py-10 sm:px-12">
+              {/* masthead */}
+              <header className="paper-masthead">
+                <p className="paper-eyebrow">
+                  {mode === 'zh' ? '中文对照版' : 'English Reading Edition'}
+                </p>
+                <h1 className="paper-title">{paper?.title ?? structure?.title ?? ''}</h1>
+                {paper?.authors && paper.authors.length > 0 && (
+                  <p className="paper-authors">
+                    {paper.authors.map((a) => a.name).join('、')}
+                  </p>
+                )}
+                <div className="paper-meta">
+                  {paper?.venue && <span>{paper.venue}</span>}
+                  {paper?.year && <span>{paper.year}</span>}
+                  <span>{paper?.page_count ?? 0} 页</span>
+                  {paper?.arxiv_id && <span>arXiv:{paper.arxiv_id}{paper.version_label}</span>}
+                </div>
+              </header>
+
+              {mode === 'zh' && translation.status === 'running' && (
+                <p className="paper-note">
+                  译文生成中，当前显示英文原文。译文按句对齐，鼠标悬停可查看英文原句。
+                </p>
+              )}
+              {mode === 'zh' && translation.status === 'ready' && (
+                <p className="paper-note">
+                  {translation.message.includes('未翻译')
+                    ? `${translation.message}，这些句子仍显示英文原文。`
+                    : '译文按句对齐，鼠标悬停中文可查看对应的英文原句；引用标记可点击跳转参考文献。'}
+                </p>
+              )}
+
+              {/* body */}
+              {doc.preamble.length > 0 && (
+                <section className="paper-section">
+                  {doc.preamble.map((item) => (
+                    <ItemView
+                      key={item.key}
+                      item={item}
+                      mode={mode}
+                      onCite={jumpToReference}
+                      onHover={(text, el) => {
+                        const rect = el.getBoundingClientRect()
+                        setTip({ text, top: rect.top - 10, left: rect.left + rect.width / 2 })
+                      }}
+                      onLeave={() => setTip(null)}
+                    />
+                  ))}
+                </section>
+              )}
+
+              {doc.sections.map(({ section, items }) => (
+                <section key={section.id} data-section={section.id} className="paper-section">
+                  {items.map((item) => (
+                    <ItemView
+                      key={item.key}
+                      item={item}
+                      mode={mode}
+                      onCite={jumpToReference}
+                      onHover={(text, el) => {
+                        const rect = el.getBoundingClientRect()
+                        setTip({ text, top: rect.top - 10, left: rect.left + rect.width / 2 })
+                      }}
+                      onLeave={() => setTip(null)}
+                    />
+                  ))}
+                </section>
+              ))}
+
+              {doc.footnotes.length > 0 && (
+                <section className="paper-section">
+                  <h2 className="paper-h2">注释</h2>
+                  <ol className="paper-footnotes">
+                    {doc.footnotes.map((note, i) => (
+                      <li key={i}>
+                        <span className="mr-1 font-mono text-[10px] text-ink-400">p.{note.page_no}</span>
+                        {note.text}
+                      </li>
+                    ))}
+                  </ol>
+                </section>
+              )}
+            </article>
           )}
         </section>
       </div>
@@ -338,37 +806,11 @@ export default function Reader() {
         )}
       </Modal>
 
-      {/* -------------------------------------------- selection translation */}
-      {selection && (
-        <div
-          className="fixed z-40 flex items-center gap-1 rounded-lg border border-ink-200 bg-white px-1.5 py-1 shadow-panel-lg dark:border-ink-700 dark:bg-ink-800"
-          style={{ left: Math.min(selection.x, window.innerWidth - 120), top: selection.y - 42 }}
-        >
-          <button className="btn-ghost !px-2 !py-1 text-[11px]" onClick={translateSelection}>
-            翻译选区
-          </button>
-          <button
-            className="btn-ghost !px-2 !py-1 text-[11px]"
-            onClick={() => {
-              setSelection(null)
-              setTranslated(null)
-            }}
-          >
-            ✕
-          </button>
-        </div>
-      )}
-      {translated && (
-        <div className="fixed bottom-5 left-1/2 z-40 w-[min(680px,90vw)] -translate-x-1/2 rounded-xl border border-ink-200 bg-white p-4 shadow-panel-lg dark:border-ink-700 dark:bg-ink-900">
-          <div className="mb-1 flex items-center justify-between">
-            <span className="font-sans text-[11px] font-semibold uppercase tracking-wider text-ink-400">
-              译文
-            </span>
-            <button className="btn-ghost !px-1 !py-0" onClick={() => setTranslated(null)}>
-              ✕
-            </button>
-          </div>
-          <div className="prose-paper max-h-56 overflow-auto text-[15px]">{translated}</div>
+      {/* ------------------------------------------------- hover tooltip */}
+      {tip && (
+        <div className="paper-tip" style={{ top: tip.top, left: tip.left }} role="tooltip">
+          <span className="paper-tip-label">English source</span>
+          {tip.text}
         </div>
       )}
     </div>
@@ -376,164 +818,152 @@ export default function Reader() {
 }
 
 /* ========================================================================== */
-/* Pages view — the original PDF rendered page by page                        */
+/* one item of the document                                                    */
 /* ========================================================================== */
-function PagesView({ paperId, structure }: { paperId: string; structure: PaperStructure | null }) {
-  const [pages, setPages] = useState<{ page_no: number; image_url: string }[]>([])
-  const [page, setPage] = useState(1)
 
-  useEffect(() => {
-    void api.pages(paperId).then((r) => setPages(r.pages)).catch(() => setPages([]))
-  }, [paperId])
-
-  const current = pages.find((p) => p.page_no === page)
-
-  return (
-    <div className="flex h-full">
-      <div className="scroll-thin flex-1 overflow-auto bg-ink-100/60 p-6 dark:bg-ink-950">
-        <div className="mx-auto max-w-4xl space-y-6">
-          {structure?.sections.map((s) => (
-            <div key={s.id} data-section={s.id} className="panel px-6 py-5">
-              <h2
-                className={[
-                  'font-serif font-semibold text-ink-900 dark:text-parchment-50',
-                  s.level === 1 ? 'text-xl' : s.level === 2 ? 'text-lg' : 'text-base',
-                ].join(' ')}
-              >
-                {s.number && <span className="mr-2 font-mono text-accent-600">{s.number}</span>}
-                {s.title}
-              </h2>
-              {s.content && (
-                <div className="prose-paper mt-3 max-h-96 overflow-hidden">{s.content}</div>
-              )}
-            </div>
-          ))}
-
-          {structure?.tables.map((t) => (
-            <div key={t.id} className="panel px-5 py-4">
-              {t.caption && (
-                <div className="mb-1 font-sans text-xs text-ink-500">Table · p.{t.page_no}</div>
-              )}
-              <div className="prose-paper text-[14px]" dangerouslySetInnerHTML={{ __html: mdToHtml(t.markdown) }} />
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <aside className="scroll-thin w-56 shrink-0 overflow-y-auto border-l border-ink-200/70 bg-white px-3 py-4 dark:border-ink-800 dark:bg-ink-900">
-        <div className="mb-2 font-sans text-[11px] font-semibold uppercase tracking-wider text-ink-400">
-          页面
-        </div>
-        <div className="space-y-1.5">
-          {pages.map((p) => (
-            <button
-              key={p.page_no}
-              onClick={() => setPage(p.page_no)}
-              className={[
-                'block w-full overflow-hidden rounded-md border text-left transition-colors',
-                p.page_no === page
-                  ? 'border-accent-400 ring-1 ring-accent-400/50'
-                  : 'border-ink-200 hover:border-ink-300 dark:border-ink-700',
-              ].join(' ')}
-            >
-              {p.image_url ? (
-                <img src={p.image_url} alt={`page ${p.page_no}`} className="w-full" loading="lazy" />
-              ) : (
-                <div className="flex h-24 items-center justify-center font-sans text-[10px] text-ink-400">
-                  p.{p.page_no}
-                </div>
-              )}
-              <div className="px-1.5 py-0.5 font-sans text-[10px] text-ink-400">p.{p.page_no}</div>
-            </button>
-          ))}
-        </div>
-        {current && (
-          <a
-            className="btn-secondary mt-3 w-full !py-1 text-[11px]"
-            href={`/api/reader/${paperId}/page/${current.page_no}/image`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            打开原图
-          </a>
-        )}
-      </aside>
-    </div>
-  )
-}
-
-/* ========================================================================== */
-/* Bilingual view — synchronised scrolling                                     */
-/* ========================================================================== */
-function BilingualView({
-  segments,
-  srcPane,
-  tgtPane,
-  onScrollSrc,
-  onScrollTgt,
+function ItemView({
+  item,
+  mode,
   onCite,
+  onHover,
+  onLeave,
 }: {
-  segments: TranslationSegment[]
-  srcPane: React.RefObject<HTMLDivElement>
-  tgtPane: React.RefObject<HTMLDivElement>
-  onScrollSrc: () => void
-  onScrollTgt: () => void
+  item: DocItem
+  mode: ViewMode
   onCite: (n: number) => void
+  onHover: (text: string, el: HTMLElement) => void
+  onLeave: () => void
 }) {
-  if (!segments.length) {
+  if (item.kind === 'heading') {
+    const { section } = item
     return (
-      <div className="flex h-full items-center justify-center">
-        <EmptyState title="正在准备对照翻译…" hint="后端会按段落对齐原文与译文，代码与公式保持英文原文。" />
-      </div>
+      <h2
+        className={[
+          'paper-h2',
+          section.level === 1 ? 'paper-h2-top' : '',
+          section.level >= 3 ? 'paper-h3' : '',
+        ].join(' ')}
+      >
+        {section.number && <span className="paper-number">{section.number}</span>}
+        {section.title}
+      </h2>
+    )
+  }
+
+  if (item.kind === 'figure') {
+    const { figure } = item
+    return (
+      <figure className="paper-figure">
+        {figure.image_url ? (
+          <img src={figure.image_url} alt={figure.caption || `figure on page ${figure.page_no}`} loading="lazy" />
+        ) : (
+          <div className="paper-figure-missing">
+            图片未生成（可在页面视图中查看第 {figure.page_no} 页）
+          </div>
+        )}
+        {figure.caption && <figcaption>{figure.caption}</figcaption>}
+      </figure>
+    )
+  }
+
+  if (item.kind === 'formula') {
+    const { formula } = item
+    const number = equationNumber(formula)
+    return (
+      <figure className="paper-formula">
+        {formula.image_url ? (
+          <img
+            src={formula.image_url}
+            alt={formula.latex || `equation on page ${formula.page_no}`}
+            loading="lazy"
+            className="paper-formula-image"
+          />
+        ) : (
+          <div className="paper-formula-fallback">{formula.raw_text}</div>
+        )}
+        <figcaption className="paper-formula-caption">
+          {number ? `公式 ${number}` : '公式'}
+          {formula.latex && (
+            <details className="paper-formula-latex">
+              <summary>LaTeX</summary>
+              <code>{formula.latex}</code>
+            </details>
+          )}
+        </figcaption>
+      </figure>
+    )
+  }
+
+  if (item.kind === 'table') {
+    const { table } = item
+    return (
+      <figure className="paper-table">
+        {table.caption && <figcaption className="paper-table-caption">{table.caption}</figcaption>}
+        {table.image_url ? (
+          // The table is shown as it is printed on the page: the cell borders
+          // and the alignment of the numbers are part of the result.
+          <img
+            src={table.image_url}
+            alt={table.caption || `table on page ${table.page_no}`}
+            loading="lazy"
+            className="paper-table-image"
+          />
+        ) : (
+          <div
+            className="prose-paper text-[14px]"
+            dangerouslySetInnerHTML={{ __html: mdToHtml(table.markdown) }}
+          />
+        )}
+        {table.image_url && table.markdown && (
+          <details className="paper-table-text">
+            <summary>表格文本</summary>
+            <div
+              className="prose-paper text-[13px]"
+              dangerouslySetInnerHTML={{ __html: mdToHtml(table.markdown) }}
+            />
+          </details>
+        )}
+      </figure>
+    )
+  }
+
+  // paragraph
+  const useTranslation = mode === 'zh' && item.segments.length > 0
+  if (!useTranslation) {
+    return (
+      <>
+        {splitParagraphs(item.text).map((paragraph, i) => (
+          <p key={i} className="paper-paragraph">
+            <CitationText text={paragraph} onCite={onCite} />
+          </p>
+        ))}
+      </>
     )
   }
 
   return (
-    <div className="grid h-full grid-cols-2 divide-x divide-ink-200/70 dark:divide-ink-800">
-      <div ref={srcPane} onScroll={onScrollSrc} className="scroll-thin overflow-y-auto px-8 py-6">
-        <div className="mb-4 font-sans text-[11px] font-semibold uppercase tracking-wider text-ink-400">
-          Original (EN)
-        </div>
-        {segments.map((s) => (
-          <article
-            key={s.index}
-            data-seg={s.index}
-            className={[
-              'mb-5 border-l-2 border-transparent pl-3 transition-colors',
-              s.kind === 'heading' ? 'font-serif text-[15px] font-semibold' : 'prose-paper text-[15px]',
-            ].join(' ')}
-          >
-            <CitationText text={s.source} onCite={onCite} />
-          </article>
-        ))}
-      </div>
-
-      <div ref={tgtPane} onScroll={onScrollTgt} className="scroll-thin overflow-y-auto px-8 py-6">
-        <div className="mb-4 font-sans text-[11px] font-semibold uppercase tracking-wider text-ink-400">
-          译文 (中文)
-        </div>
-        {segments.map((s) => (
-          <article
-            key={s.index}
-            data-seg={s.index}
-            className={[
-              'mb-5 border-l-2 border-transparent pl-3 transition-colors',
-              s.kind === 'heading'
-                ? 'font-serif text-[15px] font-semibold text-ink-900 dark:text-parchment-50'
-                : 'prose-paper text-[15px]',
-            ].join(' ')}
-          >
-            <CitationText text={s.translation} onCite={onCite} />
-          </article>
-        ))}
-      </div>
-    </div>
+    <p className="paper-paragraph">
+      {item.segments.map((segment) => (
+        <span
+          key={segment.index}
+          className="paper-sentence"
+          tabIndex={0}
+          onMouseEnter={(e) => onHover(segment.source, e.currentTarget)}
+          onFocus={(e) => onHover(segment.source, e.currentTarget)}
+          onMouseLeave={onLeave}
+          onBlur={onLeave}
+        >
+          {segment.translation || segment.source}
+        </span>
+      ))}
+    </p>
   )
 }
 
 /* ========================================================================== */
-/* Citation-aware text                                                        */
+/* citation-aware text                                                         */
 /* ========================================================================== */
+
 export function CitationText({
   text,
   onCite,
@@ -630,7 +1060,7 @@ function ReferenceDetail({
             </div>
           ))}
           <button className="btn-secondary mt-2 !py-1 text-[11px]" onClick={onJumpBack}>
-            ↩ 跳回正文引用位置
+            跳回正文引用位置
           </button>
         </div>
       )}

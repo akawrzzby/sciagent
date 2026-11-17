@@ -17,12 +17,34 @@ from typing import Any
 
 import pymupdf
 
-from app.parsing.layout import Block, crop_page_png, render_page_png
+from app.parsing.layout import Block, PAGE_IMAGE_DPI, crop_page_png, render_page_png
 
 # --------------------------------------------------------------------------- caption patterns
 _FIGURE_CAPTION = re.compile(r"^\s*(figure|fig\.?)\s*(\d+)\s*[.:：]?\s*(.*)$", re.IGNORECASE)
 _TABLE_CAPTION = re.compile(r"^\s*(table|tab\.?)\s*(\d+)\s*[.:：]?\s*(.*)$", re.IGNORECASE)
 _EQUATION_CAPTION = re.compile(r"^\s*\(?\d+\)?\s*$")
+
+# --------------------------------------------------------------------------- drawing geometry
+# Smallest side (in PDF points) a drawing must have to be considered at all.
+# Hair lines - the rules of a table or the rule under a running header - are
+# below it and are therefore ignored.
+_MIN_DRAWING_SIDE = 3.0
+# A drawing that is already this big is a figure on its own.
+_BIG_RECT_WIDTH = 70.0
+_BIG_RECT_HEIGHT = 55.0
+# A "box" of a TikZ style picture.
+_BOX_MIN_SIDE = 8.0
+_BOX_MIN_AREA = 150.0
+# A graphic region needs at least this many boxes ...
+_REGION_MIN_BOXES = 3
+# ... that span at least this fraction of the page width ...
+_REGION_MIN_WIDTH_RATIO = 0.25
+# ... and are at least this tall ...
+_REGION_MIN_HEIGHT = 30.0
+# ... and do not swallow the whole page.
+_REGION_MAX_AREA_RATIO = 0.45
+# Maximum gap between two boxes of the same picture.
+_REGION_MAX_GAP = 60.0
 
 
 @dataclass(slots=True)
@@ -74,36 +96,214 @@ class ExtractedFormula:
 
 
 # --------------------------------------------------------------------------- tables
-def extract_tables(page: pymupdf.Page, page_no: int) -> list[ExtractedTable]:
-    """Detect tables on a page and serialise them to Markdown + CSV."""
-    out: list[ExtractedTable] = []
+#: The rules of a table are horizontal lines.  In a ``booktabs`` table they are
+#: drawn as thin filled bars, which the line strategy of PyMuPDF does not see.
+_RULE_MIN_WIDTH = 40.0
+_RULE_MAX_THICKNESS = 2.0
+
+
+def _horizontal_rules(page: pymupdf.Page) -> list[tuple[float, float, float]]:
+    """The horizontal rules of a page, as ``(y, x0, x1)``.
+
+    Both the stroked lines and the thin filled bars are collected: the second
+    kind is what a ``booktabs`` table uses for its rules.
+    """
+    rules: set[tuple[float, float, float]] = set()
+    try:
+        drawings = page.get_drawings()
+    except Exception:
+        return []
+    for drawing in drawings:
+        for item in drawing.get("items", []):
+            if item[0] == "l":
+                p1, p2 = item[1], item[2]
+                if abs(p1.y - p2.y) <= 1.0 and abs(p2.x - p1.x) >= _RULE_MIN_WIDTH:
+                    rules.add((round(p1.y, 1), round(min(p1.x, p2.x), 1),
+                               round(max(p1.x, p2.x), 1)))
+            elif item[0] == "re":
+                rect = item[1]
+                if rect.height <= _RULE_MAX_THICKNESS and rect.width >= _RULE_MIN_WIDTH:
+                    rules.add((round(rect.y0, 1), round(rect.x0, 1),
+                               round(rect.x1, 1)))
+    return sorted(rules)
+
+
+def _rule_regions(
+    page: pymupdf.Page,
+    captions: list[tuple[str, str, tuple[float, float, float, float]]],
+) -> list[tuple[float, float, float, float]]:
+    """The regions of the page that are bounded by horizontal rules.
+
+    The rules that share their horizontal extent belong to the same table.  A
+    ``Table N:`` caption that stands between two rules starts a new table.
+    """
+    groups: dict[tuple[float, float], list[float]] = {}
+    for y, x0, x1 in _horizontal_rules(page):
+        key = next((k for k in groups
+                    if abs(k[0] - x0) <= 5 and abs(k[1] - x1) <= 5), None)
+        if key is None:
+            key = (x0, x1)
+            groups[key] = []
+        groups[key].append(y)
+
+    page_height = page.rect.height
+    regions: list[tuple[float, float, float, float]] = []
+    for (x0, x1), ys in groups.items():
+        ys = sorted(ys)
+        if len(ys) < 2:
+            continue
+        # A table caption between two rules starts a new table.
+        cuts = [0]
+        for i in range(len(ys) - 1):
+            low, high = ys[i], ys[i + 1]
+            if any(kind == "table" and low < bbox[1] < high
+                   for kind, _text, bbox in captions):
+                cuts.append(i + 1)
+        cuts.append(len(ys))
+        for start, end in zip(cuts, cuts[1:]):
+            chunk = ys[start:end]
+            if len(chunk) < 2:
+                continue
+            top, bottom = chunk[0], chunk[-1]
+            # The rule that separates the footnote area from the text is not a
+            # table, and a region that covers the whole page is an artefact.
+            if top >= page_height * 0.72 or bottom - top > page_height * 0.8:
+                continue
+            regions.append((x0, top, x1, bottom))
+    return regions
+
+
+def _find_tables(page: pymupdf.Page) -> tuple[list[Any], str]:
+    """Find the tables of a page that are ruled on all sides.
+
+    The ``text`` strategy is not used here: it infers the columns from the
+    words, so a page of running text looks like a table with one column per
+    word.  A table without vertical rules is found by :func:`_rule_regions`
+    instead, which looks at the rules of the page.
+    """
     try:
         finder = page.find_tables()
+        tables = list(getattr(finder, "tables", []) or [])
     except Exception:
-        return out
+        tables = []
+    return tables, "lines"
 
-    for tbl in getattr(finder, "tables", []):
+
+def _looks_like_a_table(rows: list[list[str]]) -> bool:
+    """Guard for the text strategy: prose must not be mistaken for a table.
+
+    The text strategy splits a paragraph into one column per word, so a page
+    of running text looks like a table with twenty columns.  A real table is
+    a small grid whose cells are short and mostly filled.
+    """
+    width = max(len(row) for row in rows)
+    if width < 2 or width > 24:
+        return False
+    cells = [c for row in rows for c in row]
+    filled = [c for c in cells if c]
+    if len(filled) < 4:
+        return False
+    # A table is a grid: most of its cells carry a value.
+    if len(filled) / max(1, len(cells)) < 0.15:
+        return False
+    # ... and the cells are short (numbers, labels), not paragraphs.
+    mean_len = sum(len(c) for c in filled) / len(filled)
+    return mean_len <= 45
+
+
+def _read_grid(page: pymupdf.Page,
+               bbox: tuple[float, float, float, float]) -> list[list[str]]:
+    """Read the cells of the table that lives in ``bbox``.
+
+    The region is bounded by the rules of the table, so the column structure
+    can be inferred from the words inside it.
+    """
+    rect = pymupdf.Rect(bbox[0] - 2, bbox[1] - 2, bbox[2] + 2, bbox[3] + 2)
+    rect = rect & page.rect
+    try:
+        finder = page.find_tables(strategy="text", clip=rect, min_words_vertical=2)
+        tables = list(getattr(finder, "tables", []) or [])
+    except Exception:
+        return []
+    if not tables:
+        return []
+    tbl = max(tables, key=lambda t: (t.bbox[2] - t.bbox[0]) * (t.bbox[3] - t.bbox[1]))
+    try:
+        data = tbl.extract()
+    except Exception:
+        return []
+    rows = [[(c or "").replace("\n", " ").strip() for c in row] for row in data]
+    return [r for r in rows if any(c for c in r)]
+
+
+def _bbox_overlap(a: tuple[float, float, float, float],
+                  b: tuple[float, float, float, float]) -> float:
+    """Intersection over the smaller area of two boxes."""
+    ix0, iy0 = max(a[0], b[0]), max(a[1], b[1])
+    ix1, iy1 = min(a[2], b[2]), min(a[3], b[3])
+    if ix1 <= ix0 or iy1 <= iy0:
+        return 0.0
+    inter = (ix1 - ix0) * (iy1 - iy0)
+    area_a = max(1e-6, (a[2] - a[0]) * (a[3] - a[1]))
+    area_b = max(1e-6, (b[2] - b[0]) * (b[3] - b[1]))
+    return inter / min(area_a, area_b)
+
+
+def extract_tables(page: pymupdf.Page, page_no: int,
+                   blocks: list[Block] | None = None,
+                   exclude: list[tuple[float, float, float, float]] | None = None
+                   ) -> list[ExtractedTable]:
+    """Detect the tables of a page and serialise them to Markdown + CSV.
+
+    ``exclude`` holds the regions of the page that hold a picture: the grid of
+    a chart and the frame of a legend look like a table to the ruling-line
+    strategy, and a table that sits inside a picture is not a table.
+    """
+    out: list[ExtractedTable] = []
+    captions = _collect_captions(blocks or [])
+    excluded = list(exclude or [])
+    taken: list[tuple[float, float, float, float]] = []
+
+    # (a) tables that are ruled on all sides
+    ruled, _strategy = _find_tables(page)
+    for tbl in ruled:
+        bbox = tuple(float(v) for v in tbl.bbox)
+        if any(_overlap_ratio(bbox, region) > 0.5 for region in excluded):
+            continue
         try:
             data = tbl.extract()
         except Exception:
-            continue
-        if not data or len(data) < 2:
-            continue
-        # Very wide tables are usually layout artefacts.
-        width = max(len(r) for r in data)
-        if width < 2 or width > 40:
             continue
         rows = [[(c or "").replace("\n", " ").strip() for c in row] for row in data]
         rows = [r for r in rows if any(c for c in r)]
         if len(rows) < 2:
             continue
-
-        markdown = _rows_to_markdown(rows)
-        csv_text = _rows_to_csv(rows)
-        bbox = [round(v, 2) for v in list(tbl.bbox)]
-        out.append(ExtractedTable(page_no=page_no, bbox=bbox, markdown=markdown,
-                                  csv_text=csv_text,
+        width = max(len(r) for r in rows)
+        if width < 1 or width > 40:
+            continue
+        caption, _ = _match_caption(captions, bbox, kind="table", above=True)
+        out.append(ExtractedTable(page_no=page_no, bbox=[round(v, 2) for v in bbox],
+                                  markdown=_rows_to_markdown(rows),
+                                  csv_text=_rows_to_csv(rows), caption=caption,
                                   n_rows=len(rows), n_cols=width))
+        taken.append(bbox)
+
+    # (b) booktabs tables: the horizontal rules tell where they are
+    for bbox in _rule_regions(page, captions):
+        if any(_overlap_ratio(bbox, region) > 0.5 for region in excluded):
+            continue
+        if any(_bbox_overlap(bbox, other) > 0.3 for other in taken):
+            continue
+        rows = _read_grid(page, bbox)
+        if len(rows) < 2 or not _looks_like_a_table(rows):
+            continue
+        width = max(len(r) for r in rows)
+        caption, _ = _match_caption(captions, bbox, kind="table", above=True)
+        out.append(ExtractedTable(page_no=page_no, bbox=[round(v, 2) for v in bbox],
+                                  markdown=_rows_to_markdown(rows),
+                                  csv_text=_rows_to_csv(rows), caption=caption,
+                                  n_rows=len(rows), n_cols=width))
+        taken.append(bbox)
     return out
 
 
@@ -138,26 +338,25 @@ def _rows_to_csv(rows: list[list[str]]) -> str:
 
 
 # --------------------------------------------------------------------------- figures
-def extract_figures(
-    page: pymupdf.Page,
-    page_no: int,
-    blocks: list[Block],
-    out_dir: str,
-    paper_id: str,
-    *,
-    max_figures: int = 12,
-) -> list[ExtractedFigure]:
-    """Extract figure regions.
+def figure_regions(page: pymupdf.Page,
+                   blocks: list[Block]) -> list[tuple[float, float, float, float]]:
+    """The regions of a page that hold a picture.
 
-    We look at (a) raster images embedded in the page and (b) vector drawing
-    clusters, then attach the nearest ``Figure N:`` caption.
+    Two kinds are recognised: a raster image that is embedded in the page and
+    a cluster of vector drawings.  The regions are needed before the tables
+    are read, because the grid of a chart and the frame of a legend look
+    exactly like a table to the ruling-line strategy.
     """
-    figures: list[ExtractedFigure] = []
-    captions = _collect_captions(blocks)
+    page_area = page.rect.width * page.rect.height
+    regions: list[tuple[float, float, float, float]] = []
+    seen_rects: list[tuple[float, float, float, float]] = []
 
     # (a) embedded raster images -----------------------------------------
-    seen_rects: list[tuple[float, float, float, float]] = []
-    for info in page.get_images(full=True):
+    try:
+        images = page.get_images(full=True)
+    except Exception:
+        images = []
+    for info in images:
         xref = info[0]
         try:
             rects = page.get_image_rects(xref)
@@ -168,6 +367,10 @@ def extract_figures(
                 continue
             if rect.get_area() < 4000:
                 continue
+            # A picture that covers most of the page is the page background,
+            # not a figure.
+            if rect.get_area() > 0.6 * page_area:
+                continue
             seen_rects.append((rect.x0, rect.y0, rect.x1, rect.y1))
 
     # (b) vector drawing clusters ----------------------------------------
@@ -175,14 +378,63 @@ def extract_figures(
         drawings = page.get_drawings()
     except Exception:
         drawings = []
-    cluster = _cluster_drawings(drawings)
+    cluster = _cluster_drawings(drawings, page.rect.width, page.rect.height)
     for rect in cluster:
         if any(_overlap_ratio(rect, r) > 0.6 for r in seen_rects):
             continue
         seen_rects.append(rect)
 
-    for i, (x0, y0, x1, y1) in enumerate(seen_rects[:max_figures]):
-        bbox = (x0, y0, x1, y1)
+    regions.extend(seen_rects)
+    return regions
+
+
+def extract_figures(
+    page: pymupdf.Page,
+    page_no: int,
+    blocks: list[Block],
+    out_dir: str,
+    paper_id: str,
+    *,
+    max_figures: int = 12,
+    exclude: list[tuple[float, float, float, float]] | None = None,
+) -> list[ExtractedFigure]:
+    """Extract figure regions.
+
+    We look at (a) raster images embedded in the page and (b) vector drawing
+    clusters, then attach the nearest ``Figure N:`` caption.
+    """
+    figures: list[ExtractedFigure] = []
+    captions = _collect_captions(blocks)
+    excluded = list(exclude or [])
+
+    seen_rects = [r for r in figure_regions(page, blocks)
+                  if not _hits_excluded(r, excluded)]
+
+    # A figure that is drawn as several panels (a "left" and a "right" half, or
+    # a grid of plots) is several regions on the page but one figure in the
+    # paper.  The caption tells them apart from two unrelated figures that
+    # stand side by side.
+    page_area = page.rect.width * page.rect.height
+    panels: list[tuple[float, float, float, float]] = []
+    panel_captions: list[str] = []
+    for rect in seen_rects[:max_figures]:
+        caption, _no = _match_caption(captions, rect, kind="figure")
+        merged = False
+        for i, existing in enumerate(panels):
+            if not caption or panel_captions[i] != caption:
+                continue
+            union = (min(existing[0], rect[0]), min(existing[1], rect[1]),
+                     max(existing[2], rect[2]), max(existing[3], rect[3]))
+            if (union[2] - union[0]) * (union[3] - union[1]) > 0.5 * page_area:
+                continue
+            panels[i] = union
+            merged = True
+            break
+        if not merged:
+            panels.append(rect)
+            panel_captions.append(caption)
+
+    for i, bbox in enumerate(panels):
         try:
             png = crop_page_png(page, bbox, dpi=170)
         except Exception:
@@ -202,19 +454,62 @@ def extract_figures(
     return figures
 
 
-def _cluster_drawings(drawings: list[Any]) -> list[tuple[float, float, float, float]]:
-    """Group vector drawings into figure-sized bounding boxes."""
+def _same_band(a: tuple[float, float, float, float],
+               b: tuple[float, float, float, float]) -> bool:
+    """True when two regions stand on the same line, side by side."""
+    return abs(a[1] - b[1]) <= 30 and abs(a[3] - b[3]) <= 30
+
+def _hits_excluded(rect: tuple[float, float, float, float],
+                   excluded: list[tuple[float, float, float, float]]) -> bool:
+    """True when a region overlaps one of the excluded areas (a table)."""
+    return any(_overlap_ratio(rect, other) > 0.25 for other in excluded)
+
+
+def _cluster_drawings(drawings: list[Any], page_width: float = 595.0,
+                      page_height: float = 842.0) -> list[tuple[float, float, float, float]]:
+    """Group vector drawings into figure-sized bounding boxes.
+
+    Two kinds of regions are produced:
+
+    * **big rectangles** – a drawing that is already figure sized (a plot
+      frame, a box around a picture).  Overlapping ones are merged.
+    * **graphic regions** – a picture that is drawn as many small boxes and
+      arrows (a TikZ diagram) has no big rectangle at all.  Such a cluster is
+      recognised by the *shape* of the region: at least three box-like
+      drawings that together form a wide band.  Hair lines (the rules of a
+      table or the rule under a running header) are ignored, so a text page
+      never becomes a figure.
+    """
+    page_area = max(1.0, page_width * page_height)
     rects: list[tuple[float, float, float, float]] = []
     for d in drawings:
         r = d.get("rect")
         if r is None:
             continue
-        if r.width < 70 or r.height < 55:
+        if r.width < _MIN_DRAWING_SIDE or r.height < _MIN_DRAWING_SIDE:
             continue
-        if r.get_area() > 0.85 * (page_area := 595 * 842):
+        if r.get_area() > 0.85 * page_area:
             continue
         rects.append((r.x0, r.y0, r.x1, r.y1))
-    # Merge overlapping rectangles.
+
+    big = [r for r in rects
+           if (r[2] - r[0]) >= _BIG_RECT_WIDTH and (r[3] - r[1]) >= _BIG_RECT_HEIGHT]
+    small = [r for r in rects if r not in big]
+
+    clusters = _merge_overlapping(big)
+    regions = _graphic_regions(small, page_width, page_height)
+
+    out: list[tuple[float, float, float, float]] = []
+    for rect in clusters + regions:
+        if any(_overlap_ratio(rect, existing) > 0.5 for existing in out):
+            continue
+        out.append(rect)
+    return out
+
+
+def _merge_overlapping(rects: list[tuple[float, float, float, float]]
+                       ) -> list[tuple[float, float, float, float]]:
+    """Merge the rectangles that overlap each other."""
     merged: list[list[float]] = []
     for rect in rects:
         placed = False
@@ -227,6 +522,50 @@ def _cluster_drawings(drawings: list[Any]) -> list[tuple[float, float, float, fl
         if not placed:
             merged.append(list(rect))
     return [(m[0], m[1], m[2], m[3]) for m in merged]
+
+
+def _graphic_regions(rects: list[tuple[float, float, float, float]],
+                     page_width: float, page_height: float
+                     ) -> list[tuple[float, float, float, float]]:
+    """Merge small drawings into a figure-sized band (TikZ style pictures)."""
+    boxes = [r for r in rects
+             if min(r[2] - r[0], r[3] - r[1]) >= _BOX_MIN_SIDE
+             and (r[2] - r[0]) * (r[3] - r[1]) >= _BOX_MIN_AREA]
+    if len(boxes) < _REGION_MIN_BOXES:
+        return []
+
+    clusters: list[list[float]] = []
+    for rect in boxes:
+        for c in clusters:
+            if _close_enough((c[0], c[1], c[2], c[3]), rect):
+                c[0] = min(c[0], rect[0]); c[1] = min(c[1], rect[1])
+                c[2] = max(c[2], rect[2]); c[3] = max(c[3], rect[3])
+                c[4] += 1
+                break
+        else:
+            clusters.append([rect[0], rect[1], rect[2], rect[3], 1])
+
+    out: list[tuple[float, float, float, float]] = []
+    for x0, y0, x1, y1, count in clusters:
+        width, height = x1 - x0, y1 - y0
+        if count < _REGION_MIN_BOXES:
+            continue
+        if width < page_width * _REGION_MIN_WIDTH_RATIO:
+            continue
+        if height < _REGION_MIN_HEIGHT:
+            continue
+        if width * height > _REGION_MAX_AREA_RATIO * page_width * page_height:
+            continue
+        out.append((x0, y0, x1, y1))
+    return out
+
+
+def _close_enough(a: tuple[float, float, float, float],
+                  b: tuple[float, float, float, float]) -> bool:
+    """True when two drawings belong to the same picture."""
+    dx = max(a[0] - b[2], b[0] - a[2], 0.0)
+    dy = max(a[1] - b[3], b[1] - a[3], 0.0)
+    return dx <= _REGION_MAX_GAP and dy <= _REGION_MAX_GAP
 
 
 def _overlap_ratio(a: tuple[float, float, float, float],
@@ -259,22 +598,39 @@ def _collect_captions(blocks: list[Block]) -> list[tuple[str, str, tuple[float, 
     return out
 
 
-def _match_caption(captions, bbox, *, kind: str) -> tuple[str, int]:
-    """Find the caption that belongs to a figure/table region."""
-    best_text, best_no, best_dist = "", 0, 1e9
-    for ckind, ctext, cbbox in captions:
-        if ckind != kind:
-            continue
-        dy = cbbox[1] - bbox[3]          # caption below the figure
-        if dy < -30 or dy > 220:
-            continue
-        dist = abs(dy)
-        if dist < best_dist:
+def _match_caption(captions, bbox, *, kind: str, above: bool = False) -> tuple[str, int]:
+    """Find the caption that belongs to a figure/table region.
+
+    A table is captioned *above* it and a figure *below* it (LaTeX
+    convention).  The other side is only searched when the expected side has
+    no caption at all: a page can hold two tables, and the caption of the
+    second one is closer to the bottom of the first one than its own caption
+    is to its top.
+    """
+    def search(want_above: bool) -> tuple[str, int]:
+        best_text, best_no, best_dist = "", 0, 1e9
+        for ckind, ctext, cbbox in captions:
+            if ckind != kind:
+                continue
+            if want_above:
+                up = bbox[1] - cbbox[3]
+                dist = abs(up) if -30 <= up <= 220 else None
+            else:
+                dy = cbbox[1] - bbox[3]
+                dist = abs(dy) if -30 <= dy <= 220 else None
+            if dist is None or dist >= best_dist:
+                continue
             best_dist = dist
             best_text = ctext
             m = re.match(r"^\s*(?:figure|fig\.?|table|tab\.?)\s*(\d+)", ctext, re.IGNORECASE)
             best_no = int(m.group(1)) if m else 0
-    return best_text, best_no
+        return best_text, best_no
+
+    first_above = above
+    text, no = search(first_above)
+    if text:
+        return text, no
+    return search(not first_above)
 
 
 # --------------------------------------------------------------------------- formulas
@@ -295,9 +651,11 @@ def detect_formulas(page: pymupdf.Page, page_no: int, blocks: list[Block]) -> li
         symbol_ratio = _symbol_ratio(text)
         isolated = len(text.split()) <= 40
 
-        if not (math_like or symbol_ratio > 0.32):
+        # A block that was split out of a paragraph because it is an equation
+        # is an equation by construction.
+        if not (b.is_equation or math_like or symbol_ratio > 0.32):
             continue
-        if not isolated and not math_like:
+        if not b.is_equation and not isolated and not math_like:
             continue
         # Skip pure punctuation / page numbers.
         if re.fullmatch(r"[\W\d\s]{0,6}", text):
@@ -336,7 +694,7 @@ def render_formula_image(page: pymupdf.Page, formula: ExtractedFormula,
 
 
 def save_page_image(page: pymupdf.Page, page_no: int, out_dir: str, paper_id: str,
-                    dpi: int = 130) -> str:
+                    dpi: int = PAGE_IMAGE_DPI) -> str:
     """Persist a rendered page (used by the reader and the OCR pipeline)."""
     fname = f"{paper_id}_page{page_no:04d}.png"
     path = f"{out_dir}/{fname}"

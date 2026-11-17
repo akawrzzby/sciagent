@@ -41,6 +41,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     await init_db()
 
+    # A restart kills the background translation workers.  Mark their jobs as
+    # failed so the reader can start a fresh one instead of polling a worker
+    # that no longer exists.
+    try:
+        from app.api.routers.translation import fail_running_jobs
+
+        await fail_running_jobs()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("could not clear the stale translation jobs: %s", exc)
+
     # Warm up the retrieval models in the background.  Loading bge-m3 takes a
     # couple of seconds; doing it here keeps the first user request fast and
     # makes ``/api/health`` report the *real* capability of the dense and
@@ -102,11 +112,14 @@ def create_app() -> FastAPI:
         rag,
         reader,
         search,
+        translation,
         viz,
         writing,
     )
 
-    for module in (health, papers, rag, reader, search, graph, writing, viz, admin):
+    # ``translation`` is registered before ``reader`` on purpose: both expose
+    # ``/api/reader/{paper_id}/translation`` and the first match wins.
+    for module in (health, papers, rag, translation, reader, search, graph, writing, viz, admin):
         app.include_router(module.router, prefix="/api")
 
     # ------------------------------------------------------------- errors

@@ -123,7 +123,7 @@ export default function GraphWorkbench() {
       setGraph(g)
       setActiveNode(null)
       if (!g.nodes.length) {
-        setToast('引用图谱至少需要两篇论文，请先在文献库中勾选并上传更多文献。')
+        setToast('构建引用图谱至少需要两篇文献。请在文献库中勾选并上传更多文献。')
       }
     } catch (e) {
       setToast(`构建失败：${(e as Error).message}`)
@@ -341,7 +341,7 @@ export default function GraphWorkbench() {
       const f = await api.futureWork(selected.map((p) => p.id))
       setFuture(f)
     } catch (e) {
-      setToast(`Future Work 挖掘失败：${(e as Error).message}`)
+      setToast(`Future Work 提取失败：${(e as Error).message}`)
     } finally {
       setBusyPanel(null)
     }
@@ -363,7 +363,7 @@ export default function GraphWorkbench() {
   const runQuality = async () => {
     const paperId = qualityPaper || selected[0]?.id
     if (!paperId) {
-      setToast('请先在文献库勾选一篇论文，或在下方输入 paper_id。')
+      setToast('请先在文献库中勾选一篇文献，或在下方输入 paper_id。')
       return
     }
     setBusyPanel('quality')
@@ -384,7 +384,7 @@ export default function GraphWorkbench() {
         <div>
           <h1 className="font-serif text-xl font-semibold tracking-tight">图谱综述</h1>
           <p className="mt-0.5 font-sans text-xs text-ink-500 dark:text-ink-400">
-            PageRank · Betweenness · k-core 基石挖掘 · 自动综述 · Future Work 探索
+            PageRank · Betweenness · k-core 基石识别 · 文献综述 · Future Work 提取
             {selected.length > 0 && ` · 范围：${selected.length} 篇已选`}
           </p>
         </div>
@@ -394,7 +394,7 @@ export default function GraphWorkbench() {
             onChange={setPanel}
             tabs={[
               { id: 'graph', label: '引用拓扑' },
-              { id: 'review', label: '自动综述' },
+              { id: 'review', label: '文献综述' },
               { id: 'future', label: 'Future Work' },
               { id: 'quality', label: '引用质量' },
               { id: 'conflicts', label: '矛盾检测' },
@@ -450,7 +450,7 @@ export default function GraphWorkbench() {
                 {(
                   [
                     { id: 'all', label: '全部' },
-                    { id: 'prior', label: '前作 / 基石' },
+                    { id: 'prior', label: '前作与基石' },
                     { id: 'derivative', label: '衍生' },
                   ] as { id: RoleView; label: string }[]
                 ).map((r) => (
@@ -468,7 +468,7 @@ export default function GraphWorkbench() {
                 ))}
               </div>
               <span className="font-sans text-[10.5px] text-ink-400">
-                共引 = 被同一篇论文引用；共参考 = 引用同一篇参考文献
+                共引 = 被同一篇文献引用；共参考 = 引用同一篇参考文献
               </span>
             </div>
             <div className="flex min-h-0 flex-1 gap-4">
@@ -477,7 +477,7 @@ export default function GraphWorkbench() {
               {nodes.length === 0 ? (
                 <EmptyState
                   title="尚无引用图谱"
-                  hint="上传至少两篇论文后点击「重建图谱」。系统会解析每篇论文的参考文献，匹配库内文献，并计算 PageRank / Betweenness / k-core 以识别基石节点。"
+                  hint="上传至少两篇文献后点击「重建图谱」。系统解析每篇文献的参考文献，匹配库内条目，并计算 PageRank / Betweenness / k-core 以识别基石节点。"
                 />
               ) : (
                 <>
@@ -547,7 +547,7 @@ export default function GraphWorkbench() {
                         {activeEdge.shared_citing_papers && activeEdge.shared_citing_papers.length > 0 && (
                           <div>
                             <div className="font-sans text-[10px] text-ink-400">
-                              被同一篇论文引用：
+                              同时引用这两篇文献：
                             </div>
                             <ul className="mt-0.5 space-y-0.5">
                               {activeEdge.shared_citing_papers.map((t, i) => (
@@ -738,10 +738,10 @@ export default function GraphWorkbench() {
               <div className="flex h-full flex-col items-center justify-center gap-3">
                 <EmptyState
                   title="尚未生成综述"
-                  hint="系统会基于引用图谱的 PageRank / Betweenness / k-core 指标，挑选基石文献与衍生文献，并调用大模型生成结构化的领域综述。"
+                  hint="系统依据引用图谱的 PageRank / Betweenness / k-core 指标，筛选基石文献与衍生文献，再调用大模型生成结构化的领域综述。"
                 />
                 <button className="btn-primary" onClick={runReview} disabled={busyPanel === 'review'}>
-                  {busyPanel === 'review' ? <Spinner className="h-3.5 w-3.5" /> : null} 生成自动综述
+                  {busyPanel === 'review' ? <Spinner className="h-3.5 w-3.5" /> : null} 生成综述
                 </button>
               </div>
             ) : (
@@ -817,11 +817,11 @@ export default function GraphWorkbench() {
             {!future ? (
               <div className="flex h-full flex-col items-center justify-center gap-3">
                 <EmptyState
-                  title="尚未挖掘 Future Work"
-                  hint="系统会定位每篇论文的 Future Work / Limitations / Discussion 章节片段，去重后交给大模型归纳成可执行的研究机会，并标注新颖性论证、难度与影响力。"
+                  title="尚未提取 Future Work"
+                  hint="系统定位每篇文献的 Future Work / Limitations / Discussion 章节片段，去重后交由大模型归纳为研究机会，并标注新颖性论证、难度与影响力。"
                 />
                 <button className="btn-primary" onClick={runFutureWork} disabled={busyPanel === 'future'}>
-                  {busyPanel === 'future' ? <Spinner className="h-3.5 w-3.5" /> : null} 开始挖掘
+                  {busyPanel === 'future' ? <Spinner className="h-3.5 w-3.5" /> : null} 开始提取
                 </button>
               </div>
             ) : (
@@ -829,12 +829,12 @@ export default function GraphWorkbench() {
                 <div className="flex items-center justify-between">
                   <h2 className="font-serif text-lg font-semibold">研究机会</h2>
                   <button className="btn-secondary !text-[11px]" onClick={runFutureWork} disabled={busyPanel === 'future'}>
-                    重新挖掘
+                    重新提取
                   </button>
                 </div>
 
                 {future.opportunities.length === 0 ? (
-                  <EmptyState title="未发现可归纳的 Future Work" hint="请确认文献库中包含带有 Future Work 章节的论文。" />
+                  <EmptyState title="未发现可归纳的 Future Work" hint="请确认文献库中包含带有 Future Work 章节的文献。" />
                 ) : (
                   future.opportunities.map((o, i) => (
                     <article key={i} className="rounded-xl border border-ink-200 px-4 py-3.5 dark:border-ink-700">
@@ -925,7 +925,7 @@ export default function GraphWorkbench() {
               {!quality ? (
                 <EmptyState
                   title="尚未分析"
-                  hint="该功能区分「实质性引用」与「装饰性引用」：前者真正支撑了论点（常为方法或对比基准），后者只是顺带提及。据此可以判断一篇论文真正站在谁的肩膀上。"
+                  hint="该功能区分「实质性引用」与「装饰性引用」：前者支撑论点（常为方法或对比基准），后者仅为顺带提及。该指标用于衡量一篇文献对既有工作的依赖程度。"
                 />
               ) : (
                 <>
@@ -1050,7 +1050,7 @@ export default function GraphWorkbench() {
               {!conflicts ? (
                 <EmptyState
                   title="尚未扫描"
-                  hint="矛盾检测会扫描文献库的全部文本块，找出两处互相冲突的陈述，并把双方原句一并给出——这是单纯「检索 + 摘要」做不到的。"
+                  hint="矛盾检测扫描文献库的全部文本块，找出一处或两处相互冲突的陈述，并同时给出双方原句。"
                 />
               ) : (
                 <>

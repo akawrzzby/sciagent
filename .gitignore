@@ -63,6 +63,9 @@ desktop.ini
 # ---- 部署产物 ----
 docker-compose.override.yml
 
+# ---- 内部交接文档（含团队私人联系方式，只留本地）----
+docs/HANDOFF.md
+
 # ---- 一次性诊断脚本（读凭据 / 试 API，绝不入公开仓库）----
 scripts/probe_*.py
 scripts/push_workflow_via_api.py

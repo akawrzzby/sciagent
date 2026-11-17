@@ -14,16 +14,16 @@
 
 | 指标 | 实测值 | 出处 |
 |---|---|---|
-| 回答忠实度 faithfulness | **0.7092**（三轮均值，区间 0.6378 – 0.7521） | `scripts/eval_rag.py` |
+| 回答忠实度 faithfulness | **0.8034**（三轮均值，区间 0.7898 – 0.8168） | `scripts/eval_rag.py` |
 | 引用可溯源率 traceability | **1.0000**（三轮全满） | `scripts/eval_rag.py` |
 | 库外问题诚实拒答率 | **3 / 3**，编造 0 | `scripts/eval_rag_control.py` |
 | 元数据感知检索 hit@5 | **0.9286 → 1.0000**（A/B，各自重建索引） | `scripts/eval_retrieval_ab.sh` |
-| 自动化测试 | **178 passed**（无网络、无 LLM） | `backend/tests/` |
+| 自动化测试 | **227 passed**（容器内 9 skipped；主机 236 passed） | `backend/tests/` |
 | Docker 一键构建 | 后端镜像 **4 min / 1.19 GB**，前端 **102 MB** | `scripts/ci_docker_test.sh` |
 | 541 页书籍解析 | **149.4 s** / 1254 章节 / 131 万字符 | §6.5 |
 | 稠密编码吞吐 | **99.7 passages/s**（64 线程；192 线程默认仅 7.2） | §6.5 |
 
-> 指标口径、量具的五次修复过程、以及"单篇题接近满分、跨论文对比题只有 0.31–0.56"这一能力边界，见 [`docs/technical-report.md`](./docs/technical-report.md) §6.3。
+> 指标口径、量具的五次修复过程、以及"单篇题三轮全满分、跨论文对比题只有 0.26–0.82 且波动更大"这一能力边界，见 [`docs/technical-report.md`](./docs/technical-report.md) §6.3。
 
 ---
 
@@ -205,21 +205,21 @@ PDF ──▶ 多模态解析 ──▶ 结构化文献库 ──┬──▶ �
 | 能力 | 实现 |
 |---|---|
 | 版式感知分块 | PyMuPDF 词级 bbox + 栏检测，合并行成段，保留 `page_no` / `bbox` |
-| 标题树 | 字体/字号/编号模式（`3.2.2`）联合判定，支持 26 级层级 |
+| 标题树 | 字体/字号/编号模式（`3.2.2`）联合判定，层级不限（实测最深 3 级） |
 | 双栏还原 | 按栏 x 区间切分，左右栏交替读入，避免串行 |
 | 表格 | PyMuPDF `find_tables()` → Markdown + CSV 双输出 |
 | 图片 | 提取 `image_path` + `caption`（就近的 `Figure N:` 文本） |
-| 公式 | 行内 `$...$` 与块级 `$$...$$` 双模式 + 独立公式块 |
+| 公式 | 显示公式以**页面裁剪图**呈现（跨 block 合并后整式入图，编号同框）；行内上下标按几何关系还原；LaTeX 由 VLM 读裁剪图转写 |
 | 参考文献 | 解析作者/标题/年份/venue/DOI/arXiv id，并回链库内论文 |
 | 扫描件 OCR | 检测到无文本层 → 逐页 150 DPI 栅格化 → VLM 转写（4 路并发） |
 | 语义去重 | 标题 + 摘要 embedding 余弦 > 阈值 → 判为同论文不同版本 |
 
-> **实测**：`1706.03762v1.pdf`（Attention Is All You Need）15 页 **2.5 秒**解析完成，标题、8 位作者、机构、1566 字摘要、26 级标题树（含 `3.2.2 Multi-Head Attention`）、3 表 / 8 图 / 8 公式 / **76 条结构化参考文献** 全部正确。
+> **实测**：`1706.03762v1.pdf`（Attention Is All You Need）15 页 **4.2 秒**完成版式解析（端到端 71.7 秒，含 27 条公式的多模态转写），标题、8 位作者、机构、1566 字摘要、26 个章节节点的标题树（含 `3.2.2 Multi-Head Attention`）、4 表 / 7 图 / 27 公式 / **71 条结构化参考文献** 全部正确。
 >
 > **长文档与扫描件实测**：
 > - 赛题指定的 **541 页书籍**：`UnderstandingDeepLearning_02_09_26_C.pdf` → **149.4 秒**完成，产出 **1254** 个章节节点、1 313 060 字符、**726** 张图、**1472** 个公式，无 OOM、无告警。
-> - **纯扫描件** `1706.03762v1_img.pdf`（文本层 0 字符）→ **191.2 秒**，VLM 转写后重建出 **26 级标题树**，`3.2.2 Multi-Head Attention` 层级判定为 level 3 ✓，并解析出 **38 条**结构化参考文献。
-> - **全量文献库 13 篇**（含扫描件）→ 433 页 / 2151 片段 / 748 参考文献 / 53 表 / 212 图 / 380 公式；文档级并发入库约 **6 分钟**（串行需 10 分钟以上）。
+> - **纯扫描件** `1706.03762v1_img.pdf`（文本层 0 字符）→ **191.2 秒**，VLM 转写后重建出 **26 个章节节点**，`3.2.2 Multi-Head Attention` 层级判定为 level 3 ✓。
+> - **全量文献库 15 篇**（含扫描件）→ 461 页 / 2019 片段 / 886 参考文献 / 185 表 / 205 图 / 536 公式；文档级并发入库约 **6 分钟**（串行需 10 分钟以上）。
 
 ### 模块 2 · 抗幻觉 RAG 与 Agent 编排 `backend/app/rag/` `backend/app/agents/`
 
@@ -295,7 +295,7 @@ docker compose ps          # backend / frontend / tunnel 三个服务
 |---|---|
 | 后端镜像构建 | apt 28.4 s + pip 190.3 s + 导出 13.6 s ≈ **4 min**（换源前同一构建卡死 15 分钟以上） |
 | 镜像体积 | 后端 **1.19 GB**（site-packages 521 MB）/ 前端 **102 MB** |
-| 容器内测试 | **171 passed / 7 skipped / 1.49 s**（7 个跳过是镜像内没有真实 PDF 与 bge-m3 权重） |
+| 容器内测试 | **227 passed / 9 skipped / 2.4 s**（9 个跳过是镜像内没有真实 PDF 与 bge-m3 权重；同一套用例在有 PDF 与权重的主机上是 236 passed） |
 | 全栈 | backend / frontend 均 healthy；`/`、`/ask`、`/api/health` 全部 200 |
 | 缺依赖降级 | `llm.ok=false`、`dense_available=false` 时自动退回 BM25，检索不崩 |
 
@@ -469,7 +469,7 @@ pytest -v tests/
 - 图谱：PageRank 归一性、k-core 单调性、基石节点判定
 - 扫描件：OCR Markdown 重建标题树与元数据（`test_ocr_structure.py`）
 
-> **实测：`pytest tests/ -q` → 178 passed in 30.3s**（14 个测试文件，178 个用例）。测试全程离线（conftest 已设 `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1`），不依赖网络。
+> **实测：`pytest tests/ -q` → 227 passed / 9 skipped（容器内 2.4 s）；带真实 PDF 与 bge-m3 权重的主机上是 236 passed in 52 s**（16 个测试文件，227 个用例）。测试全程离线（conftest 已设 `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1`），不依赖网络。
 
 **在 Docker 镜像里跑同一套测试**（同时校验镜像内容与工作树一致，见 §4.2）：
 
@@ -484,14 +484,12 @@ bash scripts/ci_docker_test.sh
 | 项目 | 内容 |
 |---|---|
 | 团队名称 | SciAgent Team |
-| 成员 | 魏任泽 |
 | 学校 | 西安交通大学 |
 | 学院 / 专业 | 电子与信息学部 · 软件学院 |
-| 指导老师 | 刘帅 |
-| 联系方式 | 2963542393@qq.com |
+| 成员 / 指导老师 | 见赛事系统提交页 |
+| 联系方式 | 见赛事系统提交页 |
 
-> 完整团队登记与评审联系信息以**赛事系统提交页**为准；手机等私人联系方式不在公开仓库留存。
-> 替换清单：本文本节、`docs/technical-report.md` 首页信息块、Git 提交作者信息。
+> 完整团队登记与联系信息以**赛事系统提交页**为准；姓名、指导老师与私人联系方式不在公开仓库留存。
 
 ---
 

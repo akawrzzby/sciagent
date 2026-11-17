@@ -24,7 +24,7 @@ const NAV: NavItem[] = [
   {
     to: '/library',
     label: '文献库',
-    hint: '上传 · 解析 · 去重',
+    hint: '上传 · 解析 · 版本归并',
     icon: (
       <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.6">
         <path d="M3 5.5A1.5 1.5 0 0 1 4.5 4h3.2l1.3 1.6h6.5A1.5 1.5 0 0 1 17 7.1v7.4a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14.5z" />
@@ -43,7 +43,7 @@ const NAV: NavItem[] = [
   },
   {
     to: '/ask',
-    label: '智能问答',
+    label: '文献问答',
     hint: 'Agent · RAG · 溯源',
     icon: (
       <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.6">
@@ -54,7 +54,7 @@ const NAV: NavItem[] = [
   {
     to: '/graph',
     label: '图谱综述',
-    hint: '引用拓扑 · 基石挖掘',
+    hint: '引用拓扑 · 基石识别',
     icon: (
       <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.6">
         <circle cx="5" cy="6" r="2" />
@@ -120,7 +120,7 @@ export default function App() {
           <div className="leading-tight">
             <div className="font-sans text-sm font-semibold tracking-tight">SciAgent</div>
             <div className="font-sans text-[10px] uppercase tracking-[0.14em] text-ink-400">
-              科研小助手
+              科研文献工作台
             </div>
           </div>
         </div>

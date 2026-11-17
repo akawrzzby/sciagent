@@ -28,8 +28,9 @@ FILES=(
   "2305.14314v1.pdf"
   "2307.09288v2.pdf"
   "1706.03762v1_img.pdf"
+  "language_understanding_paper.pdf"
 )
-EXPECTED="${EXPECTED:-13}"
+EXPECTED="${EXPECTED:-14}"
 
 echo "==> uploading to $BASE"
 present=()

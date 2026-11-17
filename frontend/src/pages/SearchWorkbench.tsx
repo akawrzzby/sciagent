@@ -4,7 +4,7 @@
  * The three panels cover the full "find → judge → import" loop that a
  * researcher actually performs:
  *   • arXiv 检索     — keyword search against the live arXiv API;
- *   • 智能推荐       — candidates ranked by content relevance, citation-graph
+ *   • 文献推荐       — candidates ranked by content relevance, citation-graph
  *                      position, **reproducibility** (public GitHub repo) and
  *                      accumulated user feedback;
  *   • 最新追踪       — the newest submissions of an arXiv category.
@@ -77,7 +77,7 @@ export default function SearchWorkbench() {
     try {
       const r = await api.arxivSearch(q, 15)
       setResults(r.papers)
-      if (!r.papers.length) setToast({ msg: 'arXiv 没有返回匹配结果，换个关键词试试。', kind: 'info' })
+      if (!r.papers.length) setToast({ msg: 'arXiv 未返回匹配结果，请更换关键词。', kind: 'info' })
     } catch (e) {
       setToast({ msg: `检索失败：${(e as Error).message}`, kind: 'error' })
     } finally {
@@ -110,7 +110,10 @@ export default function SearchWorkbench() {
       setRecs((list) =>
         list.map((r) => (r.arxiv_id === rec.arxiv_id ? { ...r, feedback: r.feedback + rating } : r)),
       )
-      setToast({ msg: rating > 0 ? '已记录 👍，将提升该论文的排序。' : '已记录 👎，将降低该论文的排序。', kind: 'ok' })
+      setToast({
+        msg: rating > 0 ? '已记录为有用，将提高该文献的排序权重。' : '已记录为无用，将降低该文献的排序权重。',
+        kind: 'ok',
+      })
     } catch (e) {
       setToast({ msg: `反馈失败：${(e as Error).message}`, kind: 'error' })
     }
@@ -120,9 +123,9 @@ export default function SearchWorkbench() {
     <div className="flex h-full flex-col overflow-hidden">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-ink-200/70 px-6 py-3.5 dark:border-ink-800">
         <div>
-          <h1 className="font-serif text-xl font-semibold tracking-tight">检索推荐</h1>
+          <h1 className="font-serif text-xl font-semibold tracking-tight">检索与推荐</h1>
           <p className="mt-0.5 font-sans text-xs text-ink-500 dark:text-ink-400">
-            arXiv 检索 · 可复现性加权推荐 · 分类追踪 · Function Calling 工具闭环
+            arXiv 检索 · 可复现性加权排序 · 分类追踪 · Function Calling 工具调用
           </p>
         </div>
         <Tabs<Panel>
@@ -130,7 +133,7 @@ export default function SearchWorkbench() {
           onChange={setPanel}
           tabs={[
             { id: 'arxiv', label: 'arXiv 检索' },
-            { id: 'recommend', label: '智能推荐' },
+            { id: 'recommend', label: '文献推荐' },
             { id: 'recent', label: '最新追踪' },
           ]}
         />
@@ -185,7 +188,7 @@ export default function SearchWorkbench() {
             <button className="btn-primary" onClick={loadRecent} disabled={busy}>
               {busy ? <Spinner className="h-3.5 w-3.5" /> : '拉取最新'}
             </button>
-            <span className="font-sans text-[11px] text-ink-400">用于定期追踪研究前沿</span>
+            <span className="font-sans text-[11px] text-ink-400">用于按分类追踪新提交的文献</span>
           </div>
         )}
       </div>
@@ -196,7 +199,7 @@ export default function SearchWorkbench() {
           <div className="space-y-3">
             <EmptyState
               title="检索 arXiv"
-              hint="直接检索 arXiv 官方 API，结果可一键下载并自动解析入库。"
+              hint="检索 arXiv 官方 API，命中结果可下载，下载后由系统解析入库。"
             />
             <div className="mx-auto flex max-w-2xl flex-wrap justify-center gap-2">
               {EXAMPLES.map((e) => (
@@ -270,7 +273,7 @@ export default function SearchWorkbench() {
         {panel === 'recommend' && recs.length === 0 && !busy && (
           <EmptyState
             title="暂无推荐"
-            hint="推荐引擎需要文献库作为画像来源：先上传几篇论文，或使用「arXiv 检索」下载几篇后回来刷新。"
+            hint="推荐结果以文献库内容为依据。请先上传若干文献，或在「arXiv 检索」中下载后返回刷新。"
           />
         )}
 
@@ -317,17 +320,17 @@ export default function SearchWorkbench() {
                     <div className="flex gap-1">
                       <button
                         className="btn-ghost !px-1.5 !py-0.5 !text-[13px]"
-                        title="推荐"
+                        title="标记为有用"
                         onClick={() => rate(r, 1)}
                       >
-                        👍
+                        有用
                       </button>
                       <button
                         className="btn-ghost !px-1.5 !py-0.5 !text-[13px]"
-                        title="不推荐"
+                        title="标记为无用"
                         onClick={() => rate(r, -1)}
                       >
-                        👎
+                        无用
                       </button>
                     </div>
                     <button
@@ -345,7 +348,7 @@ export default function SearchWorkbench() {
         )}
 
         {panel === 'recent' && results.length === 0 && !busy && (
-          <EmptyState title="尚未拉取" hint="选择一个 arXiv 分类，点击「拉取最新」查看最新提交的论文。" />
+          <EmptyState title="尚未拉取" hint="选择一个 arXiv 分类，点击「拉取最新」查看该分类下最新提交的文献。" />
         )}
 
         {panel === 'recent' && results.length > 0 && (
@@ -391,7 +394,7 @@ export default function SearchWorkbench() {
           <span className="kbd">arXiv API</span>
           <span className="kbd">GitHub Search API</span>
           <span className="kbd">Semantic Scholar</span>
-          <span className="ml-auto">所有外部调用均由 Agent 通过 Function Calling 调度，可在「智能问答 → 思考过程」中审计</span>
+          <span className="ml-auto">所有外部调用由 Agent 通过 Function Calling 调度，可在「文献问答 → 思考过程」中查看调用记录</span>
         </div>
       </footer>
     </div>

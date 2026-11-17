@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from app.parsing.layout import Block
+from app.parsing.layout import Block, CONTENT_BLOCK_TYPES, EXCLUDED_BLOCK_TYPES
 
 # --------------------------------------------------------------------- patterns
 # "3.2.2  Multi-Head Attention" / "3.2.2. Multi-Head"
@@ -59,6 +59,20 @@ _NOT_HEADING = re.compile(
     r"^\s*(?:figure|fig\.?|table|tab\.?|algorithm|listing|equation|eq\.?)\s*\d+",
     re.IGNORECASE,
 )
+# A page number standing on its own ("12", "iv").
+_FOLIO_RE = re.compile(r"^\s*(?:\d{1,4}|[ivxlcdm]{1,7})\s*$", re.IGNORECASE)
+# A displayed equation ("L1(U) = X", "y = ax + b").
+_EQUATION_RE = re.compile(r"[=≈≤≥∝]")
+# A line that introduces a formula or a list ends with a colon.
+_COLON_END = re.compile(r":\s*$")
+# The bibliography ends the headings of a paper.
+_BIBLIOGRAPHY = re.compile(r"^\s*(references|bibliography|文献|参考文献)\s*$", re.IGNORECASE)
+# An entry of the bibliography carries an arXiv identifier or a year.
+_REFERENCE_MARK = re.compile(r"arxiv:\s*\d{4}\.\d{4,5}", re.IGNORECASE)
+_YEAR = re.compile(r"\b(?:19|20)\d{2}\b")
+# The fonts a formula is set in.  ``cmr`` is the roman text font of LaTeX and
+# is therefore not part of the list.
+_MATH_FONTS = ("cmmi", "cmsy", "cmex", "msam", "msbm", "math")
 
 
 @dataclass(slots=True)
@@ -103,6 +117,19 @@ def _clean_title(text: str) -> str:
     return t.rstrip(" .:;")
 
 
+def _is_formula(block: Block) -> bool:
+    """True when the block is set in a math font.
+
+    A displayed formula ("H X", "E x^mu P (x)") is set in a math font and
+    stands on its own line, which makes it look like a short title.
+    """
+    for span in block.spans:
+        font = span.font.lower()
+        if any(name in font for name in _MATH_FONTS):
+            return True
+    return False
+
+
 def _looks_like_heading_text(block: Block) -> bool:
     """Reject captions, references and other non-heading lines."""
     text = block.text.strip()
@@ -113,6 +140,16 @@ def _looks_like_heading_text(block: Block) -> bool:
         return False
     if _NOT_HEADING.match(text):
         return False
+    # The page number is set in the body type and stands on its own, so it
+    # looks like a short title.  It is not one.
+    if _FOLIO_RE.match(text):
+        return False
+    # A displayed equation is a formula, not a title.
+    if _EQUATION_RE.search(text) and len(text.split()) <= 4:
+        return False
+    # A line that ends with a colon introduces a formula or a list.
+    if _COLON_END.search(text):
+        return False
     # A heading rarely ends with a sentence period or contains many commas.
     if text.count(",") > 3:
         return False
@@ -121,18 +158,35 @@ def _looks_like_heading_text(block: Block) -> bool:
     return True
 
 
+def _inside_regions(block: Block,
+                    regions: list[tuple[float, float, float, float]]) -> bool:
+    """True when the centre of the block lies inside one of the regions."""
+    if not regions:
+        return False
+    cx = (block.x0 + block.x1) / 2.0
+    cy = (block.y0 + block.y1) / 2.0
+    for x0, y0, x1, y1 in regions:
+        if x0 <= cx <= x1 and y0 <= cy <= y1:
+            return True
+    return False
+
+
 def detect_headings(
     blocks: list[Block],
     body_size: float,
     *,
     min_relative_size: float = 1.08,
     page_offset: int = 0,
+    excluded_regions: dict[int, list[tuple[float, float, float, float]]] | None = None,
 ) -> list[HeadingCandidate]:
     """Detect heading candidates in reading order.
 
     ``body_size`` is the dominant body font size of the document; a block whose
     font size exceeds ``body_size * min_relative_size`` (or that is bold and
     short) is a heading candidate.
+
+    ``excluded_regions`` holds the tables of every page: the numbers of a
+    results table stand in their own column and look like a numbered heading.
     """
     candidates: list[HeadingCandidate] = []
 
@@ -140,9 +194,28 @@ def detect_headings(
         text = block.text.strip()
         if not text or not _looks_like_heading_text(block):
             continue
+        # Figure labels, footnotes and running headers are never headings.
+        if block.block_type in EXCLUDED_BLOCK_TYPES:
+            continue
+        # The content of a table is never a heading.
+        if excluded_regions and _inside_regions(block, excluded_regions.get(block.page_no, [])):
+            continue
+        # A displayed formula is not a heading.
+        if _is_formula(block):
+            continue
+        # An entry of the bibliography is not a heading.
+        if _REFERENCE_MARK.search(text):
+            continue
+        if len(text) > 60 and _YEAR.search(text):
+            continue
 
         # A heading normally occupies a single line.
         if len(text.splitlines()) > 2:
+            continue
+
+        # The bibliography always opens a section of its own.
+        if _BIBLIOGRAPHY.match(text):
+            candidates.append(HeadingCandidate(block, _clean_title(text), "", 1, 0.9))
             continue
 
         # 1) explicit numbering ------------------------------------------
@@ -150,7 +223,8 @@ def detect_headings(
         if m:
             number, title = m.group(1), _clean_title(m.group(2))
             level = number.count(".") + 1
-            if level <= 4 and len(title) <= 140:
+            # A heading carries words; "10 0" is a row of a results table.
+            if level <= 4 and len(title) <= 140 and re.search(r"[A-Za-z]", title):
                 candidates.append(HeadingCandidate(block, title, number, level, 1.0))
                 continue
 
@@ -248,8 +322,41 @@ def flatten(tree: list[HeadingNode]) -> list[HeadingNode]:
     return out
 
 
+def section_keys_for_blocks(
+    nodes: list[HeadingNode], blocks: list[Block]
+) -> list[str | None]:
+    """Map every block to the section that is open at the block's position.
+
+    A block belongs to the last heading that starts above it.  The key is the
+    ``page_no:order_index`` pair that identifies the heading node; the
+    persistence layer turns it into the database id of the section.
+    """
+    if not nodes:
+        return [None] * len(blocks)
+
+    starts = sorted(
+        (n.page_no, float(n.bbox[1]) if n.bbox else 0.0, n.order_index)
+        for n in nodes
+    )
+    keys: list[str | None] = []
+    for b in blocks:
+        owner: tuple[int, float, int] | None = None
+        for candidate in starts:
+            if (candidate[0], candidate[1]) <= (b.page_no, b.y0):
+                owner = candidate
+            else:
+                break
+        keys.append(f"{owner[0]}:{owner[2]}" if owner else None)
+    return keys
+
+
 def assign_content(nodes: list[HeadingNode], body_blocks: list[Block]) -> None:
-    """Attach the body text that belongs to each heading node."""
+    """Attach the body text that belongs to each heading node.
+
+    Only ``body`` and ``caption`` blocks become part of a section: the labels
+    that live inside a figure, the footnotes at the bottom of a page and the
+    running headers are metadata, not prose.
+    """
     flat = flatten(nodes)
     if not flat:
         return
@@ -257,6 +364,8 @@ def assign_content(nodes: list[HeadingNode], body_blocks: list[Block]) -> None:
     # Index body blocks by page for a fast lookup.
     by_page: dict[int, list[Block]] = {}
     for b in body_blocks:
+        if b.block_type not in CONTENT_BLOCK_TYPES:
+            continue
         by_page.setdefault(b.page_no, []).append(b)
 
     for i, node in enumerate(flat):

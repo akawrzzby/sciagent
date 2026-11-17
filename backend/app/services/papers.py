@@ -21,6 +21,7 @@ from app.core.config import get_settings
 from app.core.events import get_bus, paper_channel
 from app.core.logging import get_logger
 from app.parsing import dedup as dedup_mod
+from app.parsing import layout
 from app.parsing import pipeline
 from app.rag import chunker, meta_aware
 from app.rag.embeddings import VectorStore, get_embedding_service
@@ -233,10 +234,14 @@ async def _persist(
         shutil.copy2(source_path, managed_path)
 
     # ---- chunks ----------------------------------------------------------
+    # ``full_text`` skips the footnotes / headers / figure labels, so the
+    # block list has to skip them as well -- otherwise the character offsets
+    # of the chunks would not match the plain text any more.
     chunk_list = chunker.chunk_document(
         full_text=parsed.full_text,
         sections=parsed.sections,
-        blocks=parsed.blocks,
+        blocks=[b for b in parsed.blocks
+                if b.get("block_type") not in layout.EXCLUDED_BLOCK_TYPES],
         abstract=meta.abstract,
     )
 
@@ -304,8 +309,10 @@ async def _persist(
 
         # Blocks
         for i, b in enumerate(parsed.blocks):
+            key = b.get("section_key") or ""
             db.add(ContentBlock(
-                id=uuid.uuid4().hex, paper=paper, section_id=None,
+                id=uuid.uuid4().hex, paper=paper,
+                section_id=section_ids.get(key),
                 page_no=b.get("page_no", 0), block_type=b.get("block_type", "text"),
                 bbox=b.get("bbox", []), content=b.get("content", ""), order_index=i,
             ))
@@ -489,22 +496,39 @@ async def get_paper_structure(paper_id: str) -> dict[str, Any]:
         refs = (await db.execute(
             select(PaperReference).where(PaperReference.paper_id == paper_id)
             .order_by(PaperReference.index_in_doc))).scalars().all()
+        blocks = (await db.execute(
+            select(ContentBlock).where(ContentBlock.paper_id == paper_id)
+            .order_by(ContentBlock.order_index))).scalars().all()
 
         return {
             "paper_id": paper_id,
             "title": p.title,
+            "page_count": p.page_count,
             "sections": [{"id": s.id, "title": s.title, "number": s.number,
                           "level": s.level, "page_no": s.page_start,
+                          "page_start": s.page_start, "page_end": s.page_end,
                           "bbox": s.bbox, "content": s.content,
                           "order_index": s.order_index} for s in sections],
+            # The document stream: every text block in reading order, with the
+            # classification the parser assigned (body / caption / footnote …).
+            # The reader needs it to place figures, tables and paragraphs in
+            # the order they appear on the page.
+            "blocks": [{"id": b.id, "page_no": b.page_no,
+                        "type": b.block_type or "body", "bbox": b.bbox,
+                        "content": b.content, "section_id": b.section_id,
+                        "order_index": b.order_index} for b in blocks],
             "tables": [{"id": t.id, "page_no": t.page_no, "caption": t.caption,
-                        "markdown": t.markdown, "csv": t.csv_text, "bbox": t.bbox}
+                        "markdown": t.markdown, "csv": t.csv_text, "bbox": t.bbox,
+                        "image_url": f"/api/reader/{paper_id}/tables/{t.id}/image"}
                        for t in tables],
             "figures": [{"id": f.id, "page_no": f.page_no, "caption": f.caption,
                          "image_path": f.image_path, "bbox": f.bbox,
+                         "image_url": f"/api/reader/{paper_id}/figures/{f.id}/image",
                          "description": f.description} for f in figures],
             "formulas": [{"id": x.id, "page_no": x.page_no, "latex": x.latex,
-                          "raw_text": x.raw_text, "bbox": x.bbox} for x in formulas],
+                          "raw_text": x.raw_text, "bbox": x.bbox,
+                          "image_url": f"/api/reader/{paper_id}/formulas/{x.id}/image"}
+                         for x in formulas],
             "references": [{"id": r.id, "index_in_doc": r.index_in_doc,
                             "raw_text": r.raw_text, "authors": r.authors,
                             "title": r.title, "year": r.year, "venue": r.venue,

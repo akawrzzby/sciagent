@@ -19,8 +19,10 @@ import httpx
 
 from app.rag.evaluation import evaluate_answer
 
-BASE = "http://127.0.0.1:9000"
-DB = "/home/wrz/sciagent/data/sciagent.db"
+BASE = os.environ.get("SCIAGENT_BASE", "http://127.0.0.1:9000")
+DB = os.environ.get(
+    "SCIAGENT_DB", os.path.expanduser("~/sciagent/data/sciagent.db")
+)
 
 QUESTIONS = [
     "What is the validation loss of the Transformer on CIFAR-10 after 100 epochs?",
@@ -112,7 +114,9 @@ print()
 print("=" * 72)
 print("SUMMARY:", json.dumps(summary, ensure_ascii=False))
 
-out = "/home/wrz/sciagent/data/eval_control.json"
+out = os.environ.get(
+    "SCIAGENT_OUT", os.path.expanduser("~/sciagent/data/eval_control.json")
+)
 if len(sys.argv) > 1:
     out = sys.argv[1]
 with open(out, "w", encoding="utf-8") as fh:

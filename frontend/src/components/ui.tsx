@@ -170,7 +170,7 @@ export function Modal({
       >
         <div className="panel-header sticky top-0 z-10 bg-white/95 backdrop-blur dark:bg-ink-900/95">
           <span className="panel-title">{title}</span>
-          <button className="btn-ghost !px-2" onClick={onClose} aria-label="close">
+          <button className="btn-ghost !px-2" onClick={onClose} aria-label="关闭">
             ✕
           </button>
         </div>

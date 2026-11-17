@@ -163,7 +163,7 @@ export default function Ask() {
                 ...t,
                 thinking: [
                   ...t.thinking,
-                  `[生成失败] ${String(ev.reason ?? '未知原因')}，正在补检索后重试`,
+                  `[生成失败] ${String(ev.reason ?? '未知原因')}，补充检索后重试`,
                 ],
               }))
               break
@@ -217,7 +217,7 @@ export default function Ask() {
     <div className="flex h-full flex-col overflow-hidden">
       <header className="flex items-center justify-between gap-4 border-b border-ink-200/70 px-6 py-4 dark:border-ink-800">
         <div>
-          <h1 className="font-serif text-xl font-semibold tracking-tight">智能问答</h1>
+          <h1 className="font-serif text-xl font-semibold tracking-tight">文献问答</h1>
           <p className="mt-0.5 font-sans text-xs text-ink-500 dark:text-ink-400">
             Router → Planner → Tool Calling → 证据绑定 → 流式作答 · {scopeLabel}
           </p>
@@ -241,7 +241,7 @@ export default function Ask() {
         <div className="mx-auto max-w-4xl space-y-6">
           {turns.length === 0 && (
             <div className="pt-6">
-              <div className="mb-4 font-serif text-lg font-semibold">试试这些学术问题</div>
+              <div className="mb-4 font-serif text-lg font-semibold">示例问题</div>
               <div className="grid gap-2">
                 {SUGGESTIONS.map((s) => (
                   <button
@@ -396,7 +396,7 @@ export default function Ask() {
                             {typeof c.metadata_affinity === 'number' &&
                               c.metadata_affinity > 0 && (
                                 <span
-                                  title="问题与该论文元数据（标题 / 作者 / 年份）的匹配度"
+                                  title="问题与该论文元数据（标题、作者、年份）的匹配度"
                                   className="ml-auto shrink-0 rounded bg-accent-500/12 px-1 py-px font-sans text-[9.5px] font-semibold text-accent-700 dark:text-accent-300"
                                 >
                                   元数据 {Math.round(c.metadata_affinity * 100)}%
@@ -452,7 +452,7 @@ export default function Ask() {
               }
             }}
             rows={2}
-            placeholder="向 Agent 提问，Enter 发送 / Shift+Enter 换行"
+            placeholder="向 Agent 提问；Enter 发送，Shift+Enter 换行"
             className="input resize-none !py-2 font-sans"
           />
           {busy ? (

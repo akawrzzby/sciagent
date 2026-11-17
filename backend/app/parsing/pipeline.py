@@ -221,37 +221,38 @@ async def _parse_text_document(
     metadata.infer_venue(meta, first_page_text)
     parsed.metadata = meta
 
-    # ---- reading order + headings --------------------------------------
-    if progress:
-        await progress(0.5, "构建标题层级树 …")
-    ordered_blocks: list[layout.Block] = []
-    for page_no in sorted(per_page_blocks):
-        ordered_blocks.extend(layout.reading_order(per_page_blocks[page_no]))
-
-    candidates = headings.detect_headings(ordered_blocks, body_size)
-    tree = headings.build_tree(candidates)
-    flat = headings.flatten(tree)
-    headings.assign_content(flat, ordered_blocks)
-
-    parsed.sections = [
-        {
-            "title": n.title, "number": n.number, "level": n.level,
-            "page_no": n.page_no, "bbox": n.bbox, "content": n.content,
-            "order_index": n.order_index,
-        }
-        for n in flat
-    ]
-
-    # ---- content blocks -------------------------------------------------
-    body_texts = {id(b) for b in ordered_blocks}
-    parsed.blocks = [
-        {
-            "page_no": b.page_no, "block_type": "text",
-            "bbox": layout.bbox_to_list(b.bbox), "content": b.text,
-            "order_index": b.block_index,
-        }
-        for b in ordered_blocks
-    ]
+    # ---- tables (serial: find_tables() is not thread safe) --------------
+    #
+    # The tables are extracted **before** the figures: a table is a graphic
+    # region as well, and the figure pass must not turn a table into a
+    # figure.  ``find_tables()`` mutates global state and is not thread safe
+    # (measured: 5 tables serial vs. 1 table in parallel on the same
+    # document), so this pass stays serial - it is cheap compared to the
+    # rendering.
+    #
+    # The regions of the pictures are read first: the grid of a chart and the
+    # frame of a legend look exactly like a table to the ruling-line
+    # strategy, and a table that lies inside a picture is not a table.
+    table_bboxes: dict[int, list[tuple[float, float, float, float]]] = {}
+    figure_regions: dict[int, list[tuple[float, float, float, float]]] = {}
+    for index in indices:
+        page_no = index + 1
+        try:
+            regions = extractors.figure_regions(doc[index], per_page_blocks[page_no])
+        except Exception as exc:
+            logger.debug("figure region detection failed on page %s: %s", page_no, exc)
+            regions = []
+        figure_regions[page_no] = regions
+        try:
+            for tbl in extractors.extract_tables(doc[index], page_no,
+                                                  per_page_blocks[page_no],
+                                                  exclude=regions):
+                parsed.tables.append(tbl.to_dict())
+                table_bboxes.setdefault(page_no, []).append(
+                    (float(tbl.bbox[0]), float(tbl.bbox[1]),
+                     float(tbl.bbox[2]), float(tbl.bbox[3])))
+        except Exception as exc:
+            logger.debug("table extraction failed on page %s: %s", page_no, exc)
 
     # ---- tables / figures / formulas ------------------------------------
     #
@@ -260,11 +261,8 @@ async def _parse_text_document(
     # a worker thread so the event loop keeps serving the API.  As with the
     # text extraction, every worker uses its own document handle.
     #
-    # Exception: **table detection stays serial**.  PyMuPDF's
-    # ``Page.find_tables()`` mutates global state and is not thread safe - a
-    # parallel run silently loses tables (measured: 5 tables serial vs 1
-    # parallel on the same document).  The table pass is cheap compared to the
-    # rendering, so keeping it serial costs little and preserves correctness.
+    # The pass runs **before** the block classification because the figure
+    # regions are needed to tell a label inside a figure from body text.
     def _assets_one(index: int) -> dict[str, Any]:
         doc_local = _worker_doc()
         page = doc_local[index]
@@ -277,7 +275,8 @@ async def _parse_text_document(
             try:
                 out["figures"] = [
                     fig.to_dict() for fig in extractors.extract_figures(
-                        page, page_no, per_page_blocks[page_no], out_dir, paper_id)
+                        page, page_no, per_page_blocks[page_no], out_dir, paper_id,
+                        exclude=table_bboxes.get(page_no, []))
                 ]
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug("figure extraction failed on page %s: %s", page_no, exc)
@@ -291,7 +290,7 @@ async def _parse_text_document(
                 logger.debug("formula detection failed on page %s: %s", page_no, exc)
         try:
             out["image_path"] = extractors.save_page_image(
-                page, page_no, out_dir, paper_id, dpi=130)
+                page, page_no, out_dir, paper_id, dpi=layout.PAGE_IMAGE_DPI)
         except Exception:
             out["image_path"] = ""
         return out
@@ -307,14 +306,59 @@ async def _parse_text_document(
             "width": item["width"], "height": item["height"],
         })
 
-    # ---- tables (serial: find_tables() is not thread safe) --------------
-    for index in indices:
-        page_no = index + 1
-        try:
-            for tbl in extractors.extract_tables(doc[index], page_no):
-                parsed.tables.append(tbl.to_dict())
-        except Exception as exc:
-            logger.debug("table extraction failed on page %s: %s", page_no, exc)
+    # ---- block classification -------------------------------------------
+    # Every text block is tagged with its role (body / caption /
+    # figure_label / footnote / header / text) so that the reader can tell
+    # prose from the labels that live inside a figure and from the footnotes
+    # at the bottom of a page.
+    figure_bboxes: dict[int, list[tuple[float, float, float, float]]] = {}
+    formula_bboxes: dict[int, list[tuple[float, float, float, float]]] = {}
+    page_sizes: dict[int, tuple[float, float]] = {}
+    for item in assets:
+        rects = [tuple(f["bbox"]) for f in item["figures"] if f.get("bbox")]
+        if rects:
+            figure_bboxes[item["page_no"]] = rects
+        equations = [tuple(f["bbox"]) for f in item["formulas"] if f.get("bbox")]
+        if equations:
+            formula_bboxes[item["page_no"]] = equations
+        page_sizes[item["page_no"]] = (item["width"], item["height"])
+    layout.classify_blocks(per_page_blocks, page_sizes=page_sizes,
+                           figure_bboxes=figure_bboxes,
+                           formula_bboxes=formula_bboxes, body_size=body_size)
+
+    # ---- reading order + headings --------------------------------------
+    if progress:
+        await progress(0.5, "构建标题层级树 …")
+    ordered_blocks: list[layout.Block] = []
+    for page_no in sorted(per_page_blocks):
+        ordered_blocks.extend(layout.reading_order(per_page_blocks[page_no]))
+
+    candidates = headings.detect_headings(ordered_blocks, body_size,
+                                          excluded_regions=table_bboxes)
+    tree = headings.build_tree(candidates)
+    flat = headings.flatten(tree)
+    headings.assign_content(flat, ordered_blocks)
+
+    parsed.sections = [
+        {
+            "title": n.title, "number": n.number, "level": n.level,
+            "page_no": n.page_no, "bbox": n.bbox, "content": n.content,
+            "order_index": n.order_index,
+        }
+        for n in flat
+    ]
+
+    # ---- content blocks -------------------------------------------------
+    section_keys = headings.section_keys_for_blocks(flat, ordered_blocks)
+    parsed.blocks = [
+        {
+            "page_no": b.page_no, "block_type": b.block_type,
+            "bbox": layout.bbox_to_list(b.bbox), "content": b.text,
+            "order_index": b.block_index,
+            "section_key": key,
+        }
+        for b, key in zip(ordered_blocks, section_keys)
+    ]
 
     # ---- references -----------------------------------------------------
     if progress:
@@ -323,7 +367,13 @@ async def _parse_text_document(
     parsed.references = [r.to_dict() for r in refs]
 
     # ---- full text ------------------------------------------------------
-    parsed.full_text = "\n".join(b.text for b in ordered_blocks)
+    # The footnotes, the running headers and the labels inside a figure are
+    # not part of the prose of the paper: they stay out of the plain text and
+    # therefore out of the retrieval corpus.
+    parsed.full_text = "\n".join(
+        b.text for b in ordered_blocks
+        if b.block_type not in layout.EXCLUDED_BLOCK_TYPES
+    )
     return parsed
 
 
@@ -356,7 +406,8 @@ async def _parse_scanned_document(
             continue
         png_pages.append((page_no, png))
         try:
-            img_path = extractors.save_page_image(page, page_no, out_dir, paper_id, dpi=130)
+            img_path = extractors.save_page_image(
+                page, page_no, out_dir, paper_id, dpi=layout.PAGE_IMAGE_DPI)
             parsed.pages.append({"page_no": page_no, "image_path": img_path,
                                  "width": page.rect.width, "height": page.rect.height})
         except Exception:
@@ -401,7 +452,7 @@ async def _parse_scanned_document(
     ]
 
     parsed.blocks = [
-        {"page_no": b.page_no, "block_type": "text",
+        {"page_no": b.page_no, "block_type": b.block_type,
          "bbox": layout.bbox_to_list(b.bbox), "content": b.text,
          "order_index": b.block_index}
         for b in ordered_blocks

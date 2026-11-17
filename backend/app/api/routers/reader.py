@@ -2,22 +2,28 @@
 
 from __future__ import annotations
 
-import json
-import os
-import re
+import io
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.core.config import get_settings
+from app.parsing import layout
 from app.parsing.references import citation_context, find_intext_citations
 from app.services import papers as paper_service
 from app.services import translation as translation_service
 from app.storage.db import session_scope
-from app.storage.models import Chunk, Paper, PaperReference, Translation
+from app.storage.models import (
+    Chunk,
+    PaperFigure,
+    PaperFormula,
+    PaperReference,
+    PaperTable,
+)
 
 router = APIRouter(prefix="/reader", tags=["reader"])
 
@@ -55,9 +61,117 @@ async def page_image(paper_id: str, page_no: int):
     """Serve one rendered page as PNG."""
     settings = get_settings()
     pattern = settings.data_dir / "pages" / f"{paper_id}_page{page_no:04d}.png"
+    if not _safe_under(settings.data_dir, pattern):
+        raise HTTPException(status_code=404, detail="page image not found")
     if not pattern.exists():
         raise HTTPException(status_code=404, detail="page image not found")
     return FileResponse(pattern, media_type="image/png")
+
+
+# --------------------------------------------------------------------------- images
+def _safe_under(root: Path, candidate: Path) -> bool:
+    """True when ``candidate`` really is inside ``root`` (no ``..`` escape)."""
+    try:
+        root_resolved = root.resolve()
+        candidate_resolved = candidate.resolve()
+    except OSError:
+        return False
+    return root_resolved == candidate_resolved or root_resolved in candidate_resolved.parents
+
+
+@router.get("/{paper_id}/figures/{figure_id}/image")
+async def figure_image(paper_id: str, figure_id: str):
+    """Serve the cropped image of one figure."""
+    settings = get_settings()
+    async with session_scope() as db:
+        figure = await db.get(PaperFigure, figure_id)
+        if figure is None or figure.paper_id != paper_id:
+            raise HTTPException(status_code=404, detail="figure not found")
+        path = Path(figure.image_path or "")
+
+    if not path.name or not _safe_under(settings.data_dir, path):
+        raise HTTPException(status_code=400, detail="invalid figure path")
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="figure image not found")
+    return FileResponse(path, media_type="image/png")
+
+
+@router.get("/{paper_id}/tables/{table_id}/image")
+async def table_image(paper_id: str, table_id: str):
+    """Serve a table as an image, cropped from the rendered page."""
+    settings = get_settings()
+    async with session_scope() as db:
+        table = await db.get(PaperTable, table_id)
+        if table is None or table.paper_id != paper_id:
+            raise HTTPException(status_code=404, detail="table not found")
+        page_no = table.page_no
+        bbox = table.bbox
+
+    page_path = settings.data_dir / "pages" / f"{paper_id}_page{page_no:04d}.png"
+    if not page_path.exists() or not bbox or len(bbox) < 4:
+        raise HTTPException(status_code=404, detail="table image not available")
+
+    try:
+        from PIL import Image
+
+        with Image.open(page_path) as image:
+            # The page image is rendered at a fixed resolution, so a bbox in
+            # PDF points maps to it by that factor -- no matter how wide the
+            # page is.
+            scale = layout.PAGE_IMAGE_DPI / 72.0
+            x0, y0, x1, y1 = (float(v) for v in bbox[:4])
+            crop = image.crop((
+                max(0, int(x0 * scale)), max(0, int(y0 * scale)),
+                min(image.width, int(x1 * scale)), min(image.height, int(y1 * scale)),
+            ))
+            if crop.width < 4 or crop.height < 4:
+                raise HTTPException(status_code=404, detail="table image not available")
+            buffer = io.BytesIO()
+            crop.save(buffer, format="PNG")
+            buffer.seek(0)
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=500, detail=f"table image failed: {exc}") from exc
+    return StreamingResponse(buffer, media_type="image/png")
+
+
+@router.get("/{paper_id}/formulas/{formula_id}/image")
+async def formula_image(paper_id: str, formula_id: str):
+    """Serve a display equation as an image, cropped from the rendered page.
+
+    The text of an equation extracted from a PDF is a flattened formula
+    ("log P(u|u-k, . . . , u-1; Θ)") whose subscripts and symbols are lost.
+    The cropped image keeps the typeset equation as the reader shows it.
+    """
+    settings = get_settings()
+    async with session_scope() as db:
+        formula = await db.get(PaperFormula, formula_id)
+        if formula is None or formula.paper_id != paper_id:
+            raise HTTPException(status_code=404, detail="formula not found")
+        page_no = formula.page_no
+        bbox = formula.bbox
+
+    page_path = settings.data_dir / "pages" / f"{paper_id}_page{page_no:04d}.png"
+    if not page_path.exists() or not bbox or len(bbox) < 4:
+        raise HTTPException(status_code=404, detail="formula image not available")
+
+    try:
+        from PIL import Image
+
+        with Image.open(page_path) as image:
+            scale = layout.PAGE_IMAGE_DPI / 72.0
+            x0, y0, x1, y1 = (float(v) for v in bbox[:4])
+            crop = image.crop((
+                max(0, int(x0 * scale)), max(0, int(y0 * scale)),
+                min(image.width, int(x1 * scale)), min(image.height, int(y1 * scale)),
+            ))
+            if crop.width < 4 or crop.height < 4:
+                raise HTTPException(status_code=404, detail="formula image not available")
+            buffer = io.BytesIO()
+            crop.save(buffer, format="PNG")
+            buffer.seek(0)
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=500, detail=f"formula image failed: {exc}") from exc
+    return StreamingResponse(buffer, media_type="image/png")
 
 
 # --------------------------------------------------------------------------- citations
@@ -142,51 +256,6 @@ async def translate(req: TranslateRequest) -> dict:
     return result
 
 
-@router.get("/{paper_id}/translation")
-async def document_translation(paper_id: str, target_lang: str = "zh") -> dict:
-    """The (cached) aligned translation of a whole paper."""
-    async with session_scope() as db:
-        cached = (await db.execute(
-            select(Translation).where(Translation.paper_id == paper_id,
-                                      Translation.locale == target_lang))).scalars().first()
-        if cached is not None:
-            return {"paper_id": paper_id, "locale": target_lang,
-                    "markdown": cached.markdown,
-                    "segments": cached.segments or [], "cached": True}
-
-    structure = await paper_service.get_paper_structure(paper_id)
-    if not structure:
-        raise HTTPException(status_code=404, detail="paper not found")
-
-    async with session_scope() as db:
-        blocks = (await db.execute(
-            select(Chunk).where(Chunk.paper_id == paper_id)
-            .order_by(Chunk.ordinal))).scalars().all()
-    block_dicts = [{"content": c.content, "page_no": c.page_no} for c in blocks]
-
-    segments = await translation_service.build_document_segments(
-        structure["sections"], block_dicts
-    )
-    segments = await translation_service.translate_document(segments, target_lang)
-
-    markdown = "\n\n".join(
-        (f"### {s.source}\n\n{s.translation}" if s.kind == "heading" else s.translation)
-        for s in segments
-    )
-    async with session_scope() as db:
-        paper = await db.get(Paper, paper_id)
-        if paper is None:
-            # The FK on ``translations.paper_id`` would reject the insert; fail
-            # with a clear 404 instead of a 500.
-            raise HTTPException(status_code=404, detail="paper not found")
-        db.add(Translation(id=uuid4(), paper=paper, locale=target_lang,
-                           markdown=markdown,
-                           segments=[s.to_dict() for s in segments]))
-    return {"paper_id": paper_id, "locale": target_lang, "markdown": markdown,
-            "segments": [s.to_dict() for s in segments], "cached": False}
-
-
-def uuid4() -> str:
-    import uuid
-
-    return uuid.uuid4().hex
+# The whole-document translation lives in ``app/api/routers/translation.py``:
+# it runs as a background job so the reader can show progress instead of
+# waiting for a request that takes minutes.

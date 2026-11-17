@@ -45,3 +45,30 @@ diag_server.sh
 # Scratch analysis helpers.
 inspect_eval_shape.py
 which_papers.py
+
+# One-off diagnostics of the reader rewrite (block classification, table
+# detection, caption matching).  Kept locally for reference.
+_diag_*.py
+
+# One-off diagnostics of the formula rework (printed rows, script recovery,
+# the state of a running deployment) and the page renders they produced.
+_check_*.py
+_render_page.py
+_*.png
+
+# One-off maintenance helpers that touch the database of a running deployment.
+_clear_translations.py
+
+# One-off probes used to refresh the numbers in the technical report after the
+# corpus rebuild (per-paper counts, graph size, contradiction output), the
+# encoding/recovery helpers, and the runners for the re-evaluation rounds.
+# The reusable versions of the same measurements are eval_rag.py /
+# eval_retrieval.py / run_eval_suite.sh.
+#
+# Rather than listing every new scratch script, ignore the whole `_*` family:
+# the convention in this directory is that a leading underscore means "local
+# one-off, not part of the repository", and nothing tracked starts with one.
+_*.py
+_*.sh
+_*.png
+_*.txt

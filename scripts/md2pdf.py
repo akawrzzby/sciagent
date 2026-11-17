@@ -51,8 +51,8 @@ html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 body {
   font-family: "Source Serif 4", "Noto Serif SC", Georgia, "Songti SC", serif;
   color: var(--ink);
-  font-size: 9.1pt;
-  line-height: 1.40;
+  font-size: 8.9pt;
+  line-height: 1.37;
   margin: 0;
 }
 h1, h2, h3, h4, h5 {
@@ -74,7 +74,7 @@ h1 {
 h2 { font-size: 11.8pt; margin: 11pt 0 4pt 0; }
 h3 { font-size: 10.4pt; margin: 9pt 0 3pt 0; color: var(--ink-soft); }
 h4 { font-size: 9.8pt; margin: 8pt 0 2pt 0; color: var(--ink-soft); }
-p { margin: 0 0 4.2pt 0; text-align: justify; }
+p { margin: 0 0 3.8pt 0; text-align: justify; }
 ul, ol { margin: 0 0 4.5pt 0; padding-left: 15pt; }
 li { margin: 1pt 0; }
 li > ul, li > ol { margin: 1pt 0; }

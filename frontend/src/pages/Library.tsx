@@ -98,7 +98,7 @@ export default function Library() {
         <div>
           <h1 className="font-serif text-xl font-semibold tracking-tight">文献库</h1>
           <p className="mt-0.5 font-sans text-xs text-ink-500 dark:text-ink-400">
-            上传 PDF → 语义去重 → 细粒度解析 → 建立可检索索引
+            PDF 上传 · 版本归并 · 版式解析 · 索引构建
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -180,7 +180,7 @@ export default function Library() {
                 拖拽 PDF 到此处，或点击选择文件
               </div>
               <div className="font-sans text-[11px] text-ink-400">
-                支持批量上传 · 自动识别扫描件并调用多模态 OCR · 自动检测 arXiv 版本重复
+                支持批量上传 · 扫描件经多模态 OCR 转写 · arXiv 同版本重复时提示合并
               </div>
             </>
           )}
@@ -194,7 +194,7 @@ export default function Library() {
         ) : papers.length === 0 ? (
           <EmptyState
             title="文献库为空"
-            hint="上传第一篇论文后，系统会自动完成标题树抽取、表格/公式/图表识别、参考文献结构化，并向量化建立索引。"
+            hint="上传第一篇文献后，系统将抽取标题结构、识别表格与公式、解析参考文献，并建立向量索引。"
           />
         ) : (
           <div className="space-y-2.5">
@@ -213,7 +213,7 @@ export default function Library() {
                     checked={isSelected}
                     onChange={() => togglePaper({ id: p.id, title: p.title })}
                     className="mt-1 h-3.5 w-3.5 accent-[#f98412]"
-                    title="选中用于图谱 / 综述"
+                    title="勾选后用于图谱与综述"
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start gap-2">
@@ -293,7 +293,7 @@ export default function Library() {
       <Modal
         open={Boolean(duplicate)}
         onClose={() => setDuplicate(null)}
-        title="检测到内容重复的文献"
+        title="检测到重复文献"
         wide
       >
         {duplicate && (

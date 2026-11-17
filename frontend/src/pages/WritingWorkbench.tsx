@@ -168,7 +168,7 @@ export default function WritingWorkbench() {
         <div>
           <h1 className="font-serif text-xl font-semibold tracking-tight">写作工作台</h1>
           <p className="mt-0.5 font-sans text-xs text-ink-500 dark:text-ink-400">
-            论文框架 · 引用真实性校验 · TikZ/Mermaid/Graphviz 架构图 · CSV → 学术图表 + Figure Caption
+            论文框架 · 引用真实性校验 · TikZ/Mermaid/Graphviz 架构图 · CSV 转学术图表与 Figure Caption
           </p>
         </div>
         <Tabs<Panel>
@@ -177,7 +177,7 @@ export default function WritingWorkbench() {
           tabs={[
             { id: 'framework', label: '论文框架' },
             { id: 'diagram', label: '架构图' },
-            { id: 'plot', label: '图表 & Caption' },
+            { id: 'plot', label: '图表与 Caption' },
           ]}
         />
       </header>
@@ -201,14 +201,14 @@ export default function WritingWorkbench() {
                 rows={3}
                 value={idea}
                 onChange={(e) => setIdea(e.target.value)}
-                placeholder="例如：基于大模型的意图驱动科研助手，在多文献并行场景下实现抗幻觉的证据溯源与自动综述。"
+                placeholder="例如：面向多文献并行场景的大模型科研助手，提供证据溯源与综述生成。"
               />
               <div className="mt-2 flex items-center gap-2">
                 <button className="btn-primary" onClick={runFramework} disabled={busy || idea.trim().length < 5}>
                   {busy ? <Spinner className="h-3.5 w-3.5" /> : null} 生成论文框架
                 </button>
                 <span className="font-sans text-[10.5px] text-ink-400">
-                  参考文献仅从文献库中检索，模型虚构的引用会被自动拦截并列出
+                  参考文献仅来自文献库检索结果，模型虚构的引用由护栏拦截并单独列出
                 </span>
               </div>
             </div>
@@ -216,7 +216,7 @@ export default function WritingWorkbench() {
             {!framework ? (
               <EmptyState
                 title="尚未生成框架"
-                hint="输入研究想法后，Agent 会检索文献库、筛选与该想法相关的真实文献，并据此起草标题、摘要与各章节要点。"
+                hint="输入研究想法后，Agent 检索文献库，筛选与该想法相关的已入库文献，并据此起草标题、摘要与各章节要点。"
               />
             ) : (
               <div className="space-y-4">
@@ -301,7 +301,7 @@ export default function WritingWorkbench() {
                 rows={3}
                 value={desc}
                 onChange={(e) => setDesc(e.target.value)}
-                placeholder="例如：Agent Router 接收用户问题后分流到检索、图谱或写作三个子 Agent，检索结果经 RRF 融合后交给生成器。"
+                placeholder="例如：Agent Router 接收问题后分流至检索、图谱或写作三个子 Agent，检索结果经 RRF 融合后送入生成器。"
               />
               <div className="mt-2 flex items-center gap-2">
                 <select
@@ -322,7 +322,7 @@ export default function WritingWorkbench() {
             {!diagram ? (
               <EmptyState
                 title="尚未生成架构图"
-                hint="生成 Mermaid / TikZ / Graphviz 代码。Mermaid 会实时渲染预览，TikZ 与 DOT 源码可一键复制进论文。"
+                hint="生成 Mermaid / TikZ / Graphviz 代码。Mermaid 提供实时预览，TikZ 与 DOT 源码可复制到论文。"
               />
             ) : (
               <div className="grid gap-4 lg:grid-cols-2">
@@ -411,7 +411,7 @@ export default function WritingWorkbench() {
             {!plot ? (
               <EmptyState
                 title="尚未绘图"
-                hint="粘贴论文表格的 CSV 数据，系统会渲染出版级图表，并自动撰写 Figure Caption 与关键结论。"
+                hint="粘贴论文表格的 CSV 数据，系统渲染图表并生成 Figure Caption 与关键结论。"
               />
             ) : (
               <div className="space-y-4">

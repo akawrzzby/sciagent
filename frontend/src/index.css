@@ -167,3 +167,226 @@
 .dark .sync-glow {
   background: rgb(249 132 18 / 0.08);
 }
+
+/* ---------------------------------------------------------------- paper sheet */
+/* The reading surface: one column of warm paper with the document set on it.
+   The bilingual mode reuses the same layout — the Chinese sentence is the
+   visible layer and the English source is revealed on hover. */
+@layer components {
+  .paper-sheet {
+    @apply font-serif text-ink-800;
+    font-size: 1.0625rem;
+    line-height: 1.9;
+  }
+  .dark .paper-sheet {
+    @apply text-parchment-200;
+  }
+
+  .paper-masthead {
+    @apply mb-10 border-b pb-7;
+    border-color: theme('colors.ink.200');
+  }
+  .dark .paper-masthead {
+    border-color: theme('colors.ink.800');
+  }
+  .paper-eyebrow {
+    @apply mb-2 font-sans text-[11px] font-semibold uppercase tracking-[0.18em] text-accent-700;
+  }
+  .dark .paper-eyebrow {
+    @apply text-accent-400;
+  }
+  .paper-title {
+    @apply font-serif text-2xl font-semibold leading-snug;
+  }
+  .paper-authors {
+    @apply mt-2 text-[15px] text-ink-600;
+  }
+  .dark .paper-authors {
+    @apply text-parchment-300;
+  }
+  .paper-meta {
+    @apply mt-4 flex flex-wrap gap-2 font-sans text-[11px] text-ink-500;
+  }
+  .dark .paper-meta {
+    @apply text-parchment-400;
+  }
+  .paper-meta > span {
+    @apply rounded-full border px-2.5 py-1;
+    border-color: theme('colors.ink.200');
+  }
+  .dark .paper-meta > span {
+    border-color: theme('colors.ink.700');
+  }
+
+  .paper-section + .paper-section {
+    @apply mt-8;
+  }
+  .paper-h2 {
+    @apply mt-9 mb-3 font-sans text-[15px] font-semibold tracking-wide;
+    color: theme('colors.ink.800');
+  }
+  .dark .paper-h2 {
+    color: theme('colors.parchment.100');
+  }
+  .paper-h2-top {
+    @apply mt-12 text-[17px];
+  }
+  .paper-h3 {
+    @apply mt-7 text-[14px];
+  }
+  .paper-number {
+    @apply mr-2 font-mono text-[12px] text-accent-700;
+  }
+  .dark .paper-number {
+    @apply text-accent-400;
+  }
+  .paper-paragraph {
+    @apply mb-4 text-justify;
+    hyphens: auto;
+  }
+  .paper-note {
+    @apply mb-8 border-l-2 py-1 pl-3 font-sans text-[12px] leading-relaxed text-ink-500;
+    border-color: theme('colors.accent.300');
+  }
+  .dark .paper-note {
+    @apply text-parchment-400;
+  }
+
+  /* One Chinese sentence: the English source appears on hover. */
+  .paper-sentence {
+    @apply rounded-sm px-[0.08em] transition-colors;
+    cursor: help;
+    outline: none;
+  }
+  .paper-sentence:hover,
+  .paper-sentence:focus-visible {
+    background: theme('colors.accent.50');
+  }
+  .dark .paper-sentence:hover,
+  .dark .paper-sentence:focus-visible {
+    background: rgb(249 132 18 / 0.12);
+  }
+  .paper-sentence:focus-visible {
+    box-shadow: 0 0 0 2px rgb(221 103 2 / 0.35);
+  }
+
+  .paper-figure {
+    @apply my-7 rounded-xl border bg-white/70 p-4;
+    border-color: theme('colors.ink.200');
+  }
+  .dark .paper-figure {
+    @apply bg-ink-900/60;
+    border-color: theme('colors.ink.800');
+  }
+  .paper-figure img {
+    @apply mx-auto block max-w-full rounded-lg;
+  }
+  .paper-figure-missing {
+    @apply flex h-24 items-center justify-center font-sans text-[11px] text-ink-400;
+  }
+  .paper-figure figcaption {
+    @apply mt-3 font-sans text-[12px] leading-relaxed text-ink-500;
+  }
+  .dark .paper-figure figcaption {
+    @apply text-parchment-400;
+  }
+
+  .paper-table {
+    @apply my-7;
+  }
+  .paper-table-caption {
+    @apply mb-2 font-sans text-[12px] font-semibold text-ink-700;
+  }
+  .dark .paper-table-caption {
+    @apply text-parchment-200;
+  }
+  .paper-table-image {
+    @apply block w-full rounded-lg border border-ink-200/80 bg-white;
+  }
+  .dark .paper-table-image {
+    @apply border-ink-800 bg-ink-900;
+  }
+  .paper-table-text {
+    @apply mt-2 font-sans text-[11px] text-ink-500;
+  }
+  .paper-table-text summary {
+    @apply cursor-pointer select-none;
+  }
+  .paper-table-text > div {
+    @apply mt-2 overflow-x-auto;
+  }
+
+  /* display equation -------------------------------------------------- */
+  .paper-formula {
+    @apply my-6 flex flex-col items-center rounded-lg border bg-white/70 px-4 py-3;
+    border-color: theme('colors.ink.200');
+  }
+  .dark .paper-formula {
+    @apply bg-ink-900/60;
+    border-color: theme('colors.ink.800');
+  }
+  .paper-formula-image {
+    @apply block max-w-full;
+  }
+  .paper-formula-fallback {
+    @apply font-serif text-[15px] text-ink-700 dark:text-parchment-200;
+  }
+  .paper-formula-caption {
+    @apply mt-2 flex items-center gap-2 font-sans text-[11px] text-ink-500 dark:text-parchment-300;
+  }
+  .paper-formula-latex summary {
+    @apply cursor-pointer select-none text-ink-400 hover:text-ink-700 dark:hover:text-parchment-100;
+  }
+  .paper-formula-latex code {
+    @apply mt-1 block overflow-x-auto rounded bg-ink-50 px-2 py-1 font-mono text-[11px] text-ink-700 dark:bg-ink-950 dark:text-parchment-200;
+  }
+  .paper-table-text table {
+    @apply w-full border-collapse text-left;
+  }
+  .paper-table-text th,
+  .paper-table-text td {
+    @apply border-b border-ink-200/70 px-2 py-1 align-top;
+  }
+  .paper-table-text th {
+    @apply font-semibold text-ink-700;
+  }
+  .dark .paper-table-text th,
+  .dark .paper-table-text td {
+    @apply border-ink-800;
+  }
+  .dark .paper-table-text th {
+    @apply text-parchment-200;
+  }
+
+  .paper-footnotes {
+    @apply list-decimal space-y-2 pl-5 font-sans text-[12px] leading-relaxed text-ink-500;
+  }
+  .dark .paper-footnotes {
+    @apply text-parchment-400;
+  }
+}
+
+/* The floating English source of a translated sentence. */
+.paper-tip {
+  position: fixed;
+  z-index: 60;
+  max-width: min(34rem, calc(100vw - 24px));
+  transform: translate(-50%, -100%);
+  padding: 10px 13px;
+  border-radius: 12px;
+  background: rgba(19, 27, 38, 0.95);
+  color: #f5f2ec;
+  font-family: theme('fontFamily.sans');
+  font-size: 0.82rem;
+  line-height: 1.6;
+  box-shadow: 0 18px 40px rgba(19, 27, 38, 0.28);
+  pointer-events: none;
+}
+.paper-tip-label {
+  display: block;
+  margin-bottom: 4px;
+  color: #ffc471;
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}

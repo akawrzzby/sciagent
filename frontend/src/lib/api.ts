@@ -35,6 +35,8 @@ export interface Section {
   number: string
   level: number
   page_no: number
+  page_start?: number
+  page_end?: number
   bbox: number[]
   content: string
   order_index: number
@@ -58,6 +60,7 @@ export interface FigureItem {
   page_no: number
   caption: string
   image_path: string
+  image_url?: string
   bbox: number[]
   description: string
 }
@@ -68,6 +71,7 @@ export interface TableItem {
   caption: string
   markdown: string
   csv: string
+  image_url?: string
   bbox: number[]
 }
 
@@ -76,13 +80,28 @@ export interface FormulaItem {
   page_no: number
   latex: string
   raw_text: string
+  image_url?: string
   bbox: number[]
+}
+
+/** One block of the parsed document, in reading order. */
+export interface Block {
+  id: string
+  page_no: number
+  /** body | caption | footnote | figure_label | header | text */
+  type: string
+  bbox: number[]
+  content: string
+  section_id?: string | null
+  order_index?: number
 }
 
 export interface PaperStructure {
   paper_id: string
   title: string
+  page_count?: number
   sections: Section[]
+  blocks?: Block[]
   tables: TableItem[]
   figures: FigureItem[]
   formulas: FormulaItem[]
@@ -393,12 +412,44 @@ export const api = {
     }),
   translation: (paperId: string, targetLang = 'zh') =>
     request<{
-      paper_id: string
-      locale: string
+      status: 'idle' | 'running' | 'ready' | 'error'
+      job_id?: string
+      progress?: number
+      message?: string
+      error?: string
       markdown: string
-      segments: { index: number; source: string; translation: string; kind: string; page_no: number }[]
+      segments: {
+        index: number
+        source: string
+        translation: string
+        kind: string
+        page_no: number
+        block_id?: string
+        block_order?: number
+      }[]
       cached: boolean
+      failed?: number
     }>(`/reader/${paperId}/translation?target_lang=${targetLang}`),
+  startTranslation: (paperId: string, targetLang = 'zh') =>
+    request<{
+      status: 'started' | 'running' | 'ready' | 'error'
+      job_id?: string
+      progress?: number
+      message?: string
+      error?: string
+      markdown?: string
+      segments?: {
+        index: number
+        source: string
+        translation: string
+        kind: string
+        page_no: number
+        block_id?: string
+        block_order?: number
+      }[]
+      cached: boolean
+      failed?: number
+    }>(`/reader/${paperId}/translation?target_lang=${targetLang}`, { method: 'POST' }),
 
   /* ---- writing ---- */
   framework: (idea: string) =>
