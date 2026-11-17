@@ -261,7 +261,7 @@ for shape in cover.shapes:
             run._r.getparent().remove(run._r)
         first.alignment = PP_ALIGN.CENTER
         run = first.add_run()
-        run.text = "汇报人：魏任泽　　指导老师：刘帅"
+        run.text = "答辩人：魏任泽　　指导老师：刘帅"
         style(run, 18, color=RGBColor(0xFF, 0xFF, 0xFF))
         second = frame.add_paragraph()
         second.alignment = PP_ALIGN.CENTER
