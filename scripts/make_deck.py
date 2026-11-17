@@ -1,9 +1,9 @@
 """Build the defence deck by editing the XJTU template itself.
 
-Typography follows the request: Chinese in 宋体, Latin and digits in Times New
-Roman, black text, bold where it matters.  The measured numbers are laid out as
-a three-line table, the innovations get their own page before the summary, and
-the reader is shown twice — the original-text view and the bilingual view.
+Typography: Chinese in 宋体, Latin and digits in Times New Roman, black ink,
+bold where it matters.  Every content page opens with a short paragraph and only
+then lists points; the experiment and the requirement checklist are three-line
+tables.
 """
 
 from __future__ import annotations
@@ -22,8 +22,8 @@ from pptx.util import Inches, Pt
 
 TEMPLATE = pathlib.Path(r"E:\西交\研究生\面试ppt\党员工作站 - 副本.pptx")
 OUT = pathlib.Path(r"E:\西交\研究生\面试ppt\SciAgent-答辩-new.pptx")
-ARCH = pathlib.Path(
-    r"E:\西交\研究生\比赛\AI大模型创新应用挑战赛\sciagent\docs\figures\fig-arch.png")
+FIGURES = pathlib.Path(
+    r"E:\西交\研究生\比赛\AI大模型创新应用挑战赛\sciagent\docs\figures")
 
 RED = RGBColor(0xC0, 0x1B, 0x2E)
 INK = RGBColor(0x00, 0x00, 0x00)
@@ -157,14 +157,19 @@ def add_ribbon(slide, section: int) -> None:
 def page(title, section):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     add_ribbon(slide, section)
-    textbox(slide, 0.60, 1.66, 15.5, 0.8, title, size=32, bold=True)
+    textbox(slide, 0.60, 1.62, 15.8, 0.8, title, size=32, bold=True)
     return slide
 
 
-def bars(slide, x, y, w, items, *, size=23, gap=1.35):
+def lead(slide, text, *, y=2.55, size=19, w=18.4, color=INK):
+    """The opening paragraph of a page: what this page is about, in prose."""
+    return textbox(slide, 0.70, y, w, 1.6, text, size=size, color=color, spacing=1.45)
+
+
+def bars(slide, x, y, w, items, *, size=21, gap=1.25):
     for index, item in enumerate(items):
         top = y + index * gap
-        dot = slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(x), Inches(top + 0.16),
+        dot = slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(x), Inches(top + 0.18),
                                      Inches(0.15), Inches(0.15))
         dot.fill.solid()
         dot.fill.fore_color.rgb = RED
@@ -209,8 +214,8 @@ def rule(slide, x, y, w, thickness=0.02, color=INK):
     return bar
 
 
-def three_line_table(slide, x, y, w, rows, col_widths, *, header_size=20,
-                     body_size=19, row_height=0.72):
+def three_line_table(slide, x, y, w, rows, col_widths, *, header_size=19,
+                     body_size=17, row_height=0.72):
     """A 三线表: a top rule, one under the header, one at the bottom."""
     total = sum(col_widths)
     widths = [w * width / total for width in col_widths]
@@ -271,220 +276,226 @@ for shape in cover.shapes:
         shape.top = Inches(9.3)
         shape.height = Inches(1.0)
 
-# --------------------------------------------------------------- 项目背景
-slide = page("科研文献的五类困难", 0)
-bars(slide, 0.70, 2.55, 18.4, [
-    "PDF 并非结构化文本：双栏顺序、跨栏图表、公式与脚注，直接抽取即错序",
-    "生成内容不可信：杜撰参考文献、混淆作者、把一篇的结论安到另一篇",
-    "阅读工具割裂：阅读器不懂语义，翻译丢失指代，管理软件不能提问",
-    "方向判断缺依据：读完二十篇，仍说不清哪些空白尚未被填补",
-    "写作从零起笔：框架、架构图、数据表，参考文献最易出错",
-], size=23, gap=1.32)
+# ------------------------------------------------ 2. 研究背景与五类困难
+slide = page("研究背景与五类困难", 0)
+lead(slide, "用大模型辅助科研，已经从尝试走向日常：检索、总结、改写都有成熟工具，"
+            "读一篇论文的时间确实被压缩了。但把它真正放进科研流程，仍受制于五类问题。"
+            "它们看似各不相同，最后都指向同一件事——模型给出的结论指不回原文。",
+     size=19, y=2.55)
+textbox(slide, 0.70, 4.62, 18.4, 0.9,
+        "这个缺口有多严重：带引用生成时，引用幻觉率在 78% 到 90% 之间；PubMed Central 上"
+        "被判定伪造的引用，从 2023 年的 1/2828 涨到 2025 年的 1/458；完全正确的引用只有 26.5%。"
+        "（OpenScholar，Nature 650:857–863）",
+        size=16, color=INK, spacing=1.4)
+bars(slide, 0.70, 5.85, 18.4, [
+    "版面：双栏顺序、跨栏图表、公式与脚注，直接抽取就是错序",
+    "生成：杜撰参考文献、混淆作者、把一篇的结论安到另一篇",
+    "阅读：工具彼此割裂，翻译丢失指代，管理软件不能提问",
+    "判断：读完二十篇，仍说不清哪些空白尚未被填补",
+    "写作：从零起笔，框架、架构图与参考文献最易出错",
+], size=19, gap=1.02)
 
-slide = page("有据可查的量级", 0)
-three_line_table(slide, 1.0, 2.55, 18.0, [
-    ["指标", "数值", "来源"],
-    ["GPT-4o 带引用生成的引用幻觉率", "78% – 90%", "OpenScholar，Nature 650:857–863"],
-    ["PMC 上被判定伪造的引用比例（2023 → 2025）", "1/2828 → 1/458", "Barrot 等统计"],
-    ["2026 年前七周的同一比例", "1/277", "同上"],
-    ["AI 生成引用完全正确的比例", "约 26.5%", "同上"],
-], col_widths=[8.4, 3.4, 6.2], header_size=21, body_size=19, row_height=0.82)
-
-# --------------------------------------------------------------- 系统设计
-slide = page("系统定位：结论必须指回原文", 1)
-bars(slide, 0.70, 2.55, 18.4, [
-    "证据优先：每一项结论都指回原文的字符区间，指不回去就不说",
+# ------------------------------------------------ 3. 系统定位
+slide = page("系统定位：先把可信做实", 0)
+lead(slide, "要解决上面五个问题，关键不在换一个更强的模型，而在让结论可核查。"
+            "可信来自两件事：说法有出处，出处能定位。围绕这一点，系统定了三条原则，"
+            "并把它们折算成三个可度量的目标。",
+     size=19, y=2.55)
+textbox(slide, 0.70, 4.55, 18.4, 0.5, "三条原则", size=21, bold=True)
+bars(slide, 0.70, 5.10, 18.4, [
+    "证据优先：每一项结论都绑定原文的字符区间，指不回去就不说",
     "结构优先：标题、表格、公式、参考文献分别建模，不做无结构拼接",
-    "可降级：稠密通道失效退化为 BM25；模型超时给出明确错误",
-    "可度量：解析准确、回答可信、闭环完整，三项都有实测",
-], size=23, gap=1.5)
+    "可降级：稠密通道失效退化为 BM25，模型超时给出明确错误",
+], size=19, gap=1.0)
+textbox(slide, 0.70, 8.05, 18.4, 0.5, "三个目标", size=21, bold=True)
+textbox(slide, 0.70, 8.60, 18.4, 1.6,
+        "解析准确：标题层级、作者、表格与参考文献字段正确　·　"
+        "回答可信：每条结论可点回原文　·　闭环完整：入库到写作全在系统内",
+        size=18, spacing=1.4)
 
+# ------------------------------------------------ 4. 系统架构
 slide = page("系统架构：五层，每层只依赖下一层", 1)
-if ARCH.exists():
-    slide.shapes.add_picture(str(ARCH), Inches(0.60), Inches(2.55), width=Inches(11.3))
-textbox(slide, 12.3, 2.7, 7.1, 7.0,
-        "展现层经 /api 与 SSE 访问编排层\n\n"
-        "编排层调用能力层的纯函数\n\n"
-        "能力层读写存储，再向下使用模型\n\n"
-        "解析器不依赖 HTTP，检索器不依赖模型在线",
-        size=18, spacing=1.5)
+arch = FIGURES / "fig-arch.png"
+if arch.exists():
+    slide.shapes.add_picture(str(arch), Inches(0.45), Inches(2.30), width=Inches(9.4))
+textbox(slide, 10.35, 2.30, 9.3, 0.5, "各层职责", size=20, bold=True)
+textbox(slide, 10.35, 2.85, 9.3, 5.3,
+        "展现层　页面与事件流渲染，只调接口\n\n"
+        "编排层　路由、规划、工具循环、作答与校验\n\n"
+        "能力层　解析、检索、图谱、写作等纯函数\n\n"
+        "存储层　论文、块、引用、会话与审计记录\n\n"
+        "模型层　自托管大模型、向量与重排模型",
+        size=15, spacing=1.4)
+rule(slide, 0.70, 8.72, 18.4, 0.012, RGBColor(0xB8, 0xBE, 0xC8))
+textbox(slide, 0.70, 8.86, 18.4, 1.2,
+        "三处实测优化：编码吞吐 192 线程反而下降，64 线程时 7.2 → 99.7 篇/秒（13.8 倍）；"
+        "答案阶段关闭推理通道，跨论文题 214 秒无答案降到 0.8 秒；向量索引按论文文件化，"
+        "查询期只映射参与检索的几篇。",
+        size=14, spacing=1.35)
 
-slide = page("AI 技术方案：选型的理由", 1)
-three_line_table(slide, 0.85, 2.5, 18.3, [
-    ["环节", "选型", "依据"],
-    ["大模型", "Qwen3.8-27B 自托管", "27B 在成本与能力间取平衡；难的部分下沉到确定性代码"],
-    ["解析", "PyMuPDF-Layout", "DocLayNet F1 0.8356，Docling 0.8102；参数 1.8M 对 20M"],
-    ["检索", "BM25 + bge-m3 + RRF", "精确术语与语义覆盖兼得；RRF 只用排名，无需调参"],
-    ["重排", "bge-reranker-v2-m3", "交叉编码器把正确段落由第 2 位提到第 1 位"],
-    ["扫描件", "多模态 VLM", "只有它能同时处理双栏顺序与数学公式"],
-], col_widths=[2.4, 5.2, 10.7], header_size=20, body_size=18, row_height=0.98)
-
-slide = page("集成方式与优化策略", 1)
-textbox(slide, 0.75, 2.5, 18.4, 7.6,
-        "集成：取证与生成分离\n"
-        "　　阶段 A 只取证，产出带字符区间的证据集合；阶段 B 只依据证据生成\n"
-        "　　两阶段以证据为唯一接口，界面可逐条审计\n\n"
-        "优化一：编码吞吐　　192 线程反而下降；64 线程时 7.2 → 99.7 篇/秒，约 13.8 倍\n"
-        "优化二：答案阶段关闭推理　　跨论文题由 214 秒无答案降到 0.8 秒且正文完整\n"
-        "优化三：向量索引按论文文件化，查询期只映射参与检索的几篇",
-        size=22, spacing=1.5)
-
-# --------------------------------------------------------------- Agent 角色
-AGENT_FIG = pathlib.Path(r"E:\西交\研究生\面试ppt\art\agent-a.png")
+# ------------------------------------------------ 5. Agent 角色架构
 slide = page("Agent 角色架构：五个角色，一条回路", 1)
-if AGENT_FIG.exists():
-    slide.shapes.add_picture(str(AGENT_FIG), Inches(0.45), Inches(2.42), width=Inches(11.5))
-textbox(slide, 12.3, 2.50, 7.3, 0.45, "角色的分工", size=19, bold=True)
-textbox(slide, 12.3, 3.05, 7.3, 5.6,
+agent_fig = FIGURES / "fig-agent.png"
+if agent_fig.exists():
+    slide.shapes.add_picture(str(agent_fig), Inches(0.45), Inches(2.35), width=Inches(9.3))
+textbox(slide, 10.20, 2.35, 9.4, 0.45, "角色的分工", size=19, bold=True)
+textbox(slide, 10.20, 2.85, 9.4, 5.2,
         "路由　规则优先判意图，未命中交给模型\n\n"
         "规划　拆成子任务与工具序列\n\n"
         "执行　ReAct 循环取证，带步数上限\n\n"
         "作答　只按证据编号起草\n\n"
         "校验　护栏、引用对齐、自反馈补检索",
-        size=15, spacing=1.45)
-textbox(slide, 0.60, 9.28, 18.8, 0.8,
+        size=14, spacing=1.4)
+textbox(slide, 0.70, 8.85, 18.4, 1.0,
         "角色是职责边界，不是各自扮演人格：同一个模型承担五种职责，靠提示与工具权限区分。"
         "多角色互相评审会让模型集体高估自己（自评 6.1 / 人类 3.8），所以只设岗位，不设演员。",
-        size=13, spacing=1.4)
+        size=12.5, spacing=1.35)
 
-# --------------------------------------------------------------- 功能一
-slide = page("功能一：文献库", 2)
-textbox(slide, 0.62, 2.35, 8.6, 0.45, "上传即解析，版本自动归并", size=17, color=MUTED)
-bars(slide, 0.70, 2.95, 8.2, [
-    "PyMuPDF 版面解析：标题、表格、公式、参考文献分别落库",
-    "版本去重：标题与摘要相似度超阈值判为同一篇",
-    "扫描件逐页转写，识别结果参与后续检索",
-    "索引按论文文件化，检索时只加载相关几篇",
-], size=19, gap=1.6)
-video_frame(slide, 9.2, 2.45, 10.3, 5.8, "文献库：上传、解析进度、版本归并")
+# ------------------------------------------------ 6. AI 技术选型
+slide = page("AI 技术方案：选型与理由", 1)
+lead(slide, "选型遵循一条原则：能确定的事不交给模型。模型只负责语言理解与生成，"
+            "解析、检索、图论这些有确定答案的部分，全部下沉到代码里。",
+     size=19, y=2.55)
+bars(slide, 0.70, 3.95, 18.4, [
+    "大模型　Qwen3.8-27B 自托管：27B 在成本与能力之间平衡，结构化输出稳定，数据不出内网",
+    "解析　PyMuPDF-Layout：DocLayNet F1 0.8356，对 Docling 的 0.8102，参数 1.8M 且无需 GPU",
+    "检索　BM25 + bge-m3 + RRF：稀疏通道精确命中术语，稠密通道覆盖同义改写，RRF 融合只看排名",
+    "重排　bge-reranker-v2-m3：交叉编码器逐对打分，把正确段落从第 2 位提到第 1 位",
+    "扫描件　多模态 VLM：唯一能同时处理双栏顺序与数学公式的方案",
+], size=17, gap=1.25)
 
-# --------------------------------------------------------------- 功能二（两页）
-slide = page("功能二：阅读器 · 原文视图", 2)
-textbox(slide, 0.62, 2.35, 8.6, 0.45, "保留版式，但把结构还原出来", size=17, color=MUTED)
-bars(slide, 0.70, 2.95, 8.2, [
-    "Block 模型：段落、表格、公式、图各自建模",
-    "按版面几何重建阅读顺序，双栏与跨栏都还原",
-    "公式用 KaTeX，编号右对齐；表格可选中",
-    "图表取自原 PDF 裁剪图，可切回原图",
-], size=19, gap=1.6)
-video_frame(slide, 9.2, 2.45, 10.3, 5.8, "阅读器：原文视图、表格与公式")
-
-slide = page("功能二：阅读器 · 中英对照", 2)
-textbox(slide, 0.62, 2.35, 8.6, 0.45, "逐句对齐，悬停看原句", size=17, color=MUTED)
-bars(slide, 0.70, 2.95, 8.2, [
-    "句子级对齐：译文与英文原句一一配对",
-    "译文按句缓存，命中即出，不重复调用",
-    "悬停显示原句，浮层不挡引用点击",
-    "引用识别两种写法：数字与作者-年份",
-], size=19, gap=1.6)
-mock = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(9.2), Inches(2.45),
-                              Inches(10.3), Inches(5.8))
-mock.fill.solid()
-mock.fill.fore_color.rgb = RGBColor(0xFF, 0xFB, 0xF6)
-mock.line.color.rgb = RGBColor(0xE2, 0xD8, 0xC8)
-mock.shadow.inherit = False
-textbox(slide, 9.6, 2.75, 9.5, 0.4, "阅读器 · 中英对照", size=13, color=MUTED)
-textbox(slide, 9.6, 3.25, 9.5, 1.4,
-        "BERT 在概念上简单，但实验上很有说服力。它在十一项自然语言处理任务上取得了新的最优结果。",
-        size=19, spacing=1.5)
-textbox(slide, 9.6, 4.55, 9.5, 1.2,
-        "BERT is conceptually simple and empirically powerful. It obtains new "
-        "state-of-the-art results on eleven natural language processing tasks.",
-        size=13, color=MUTED, spacing=1.4)
-rule(slide, 9.6, 5.95, 9.5, 0.01, RGBColor(0xD8, 0xD8, 0xD8))
-textbox(slide, 9.6, 6.15, 9.5, 1.6,
-        "悬停中文，浮层显示英文原句；\n"
-        "引用编号可点，弹卡片后再跳到参考文献条目。",
-        size=15, color=MUTED, spacing=1.5)
-
-# --------------------------------------------------------------- 功能三到六
+# ------------------------------------------------ 7-14. 功能演示
 FEATURES = [
-    ("功能三：文献问答", "先取证，再作答",
+    ("功能一：文献库",
+     "文献库是整条流水线的入口。上传的 PDF 在这里被解析成结构化数据，"
+     "后续的阅读、检索、问答与写作，都建立在它之上。",
+     ["版面解析：标题、表格、公式、参考文献分别落库",
+      "版本去重：标题与摘要相似度超阈值判为同一篇",
+      "扫描件：逐页转写，识别结果参与检索",
+      "索引：按论文文件化，检索时只加载相关几篇"],
+     "文献库：上传、解析进度、版本归并"),
+    ("功能二：阅读器 · 原文视图",
+     "阅读器不把 PDF 当图片贴上来，而是按解析出的结构重新排版："
+     "长文档可以连续读，表格能选中，公式能排版。",
+     ["Block 模型：段落、表格、公式、图各自建模",
+      "按版面几何重建阅读顺序，双栏与跨栏都还原",
+      "公式用 KaTeX，编号右对齐；表格可选中",
+      "图表取自原 PDF 裁剪图，可切回原图"],
+     "阅读器：原文视图、表格与公式"),
+    ("功能二：阅读器 · 中英对照",
+     "中英对照解决的是「读得慢、不敢跳」：译文与英文原句逐句对齐，"
+     "悬停即见原句，不必来回翻页。",
+     ["句子级对齐：译文与英文原句一一配对",
+      "译文按句缓存，命中即出，不重复调用",
+      "悬停显示原句，浮层不挡引用点击",
+      "引用识别两种写法：数字与作者-年份"],
+     "阅读器：中英对照、悬停原句"),
+    ("功能三：文献问答",
+     "问答是整个系统的主线：先把问题拆开，再去库里取证，最后只依据证据作答，"
+     "每句话都能点回原文。",
      ["阶段 A 只取证：ReAct 循环调用检索与读段",
       "证据编号成块，阶段 B 只许引用这些编号",
       "覆盖率不足触发自反馈，补检索后重写",
       "证据不足直接拒答，不给猜测性结论"],
      "问答：提问、思考过程、带引用的回答、拒答"),
-    ("功能四：图谱综述", "看引用关系，找奠基工作",
-     ["引用图上算四个指标：PageRank、介数、k-core、HITS",
+    ("功能四：图谱综述",
+     "图谱把文献之间的引用关系画出来，用图论指标判断哪几篇是这个方向的奠基工作，"
+     "哪几篇是衍生。",
+     ["四个指标联合判定：PageRank、介数、k-core、HITS",
       "共引与共参考两种相似边，可切换",
       "矛盾检测规则化：同指标不同值即冲突",
       "综述与后续研究只由库内文献生成"],
      "图谱：三视图、基石与衍生、矛盾检测、综述"),
-    ("功能五：检索推荐", "追踪 arXiv，标注可复现性",
-     ["arXiv 实时接口与分类追踪，结果一键入库",
-      "入库即触发解析与索引，无需二次操作",
+    ("功能五：检索推荐",
+     "检索面向库外的 arXiv：找到、比较、入库，入库后自动进入解析与索引流程，"
+     "不需要二次操作。",
+     ["arXiv 实时接口与分类追踪",
+      "结果一键入库，入库即解析建索引",
       "可复现性检查：仓库是否存在、能否运行",
       "用户反馈参与排序"],
      "检索：arXiv 检索、一键入库、可复现性标注"),
-    ("功能六：写作工作台", "框架、架构图与数据图表",
+    ("功能六：写作工作台",
+     "写作工作台把「读」的结果变成「写」的起点：论文框架、架构图与数据图表，"
+     "三件事都在库内文献的基础上完成。",
      ["框架的参考文献以库内文献为白名单",
       "校验不通过的直接拦截，单独列出",
       "架构图输出 Mermaid、TikZ、Graphviz 代码",
       "CSV 出图同时给图注与结论"],
      "写作：框架、架构图、CSV 转图表、拦截列表"),
+    ("特色：证据链与引用卡片",
+     "可信不是一句口号，它落在三个可检查的地方：证据、引用与拒答。"
+     "这一页把这三件事放在一起看。",
+     ["取证与生成分离，证据是两者唯一接口",
+      "引用对齐到字符区间，摘除无据引用",
+      "空答案判失败，翻倍预算重试",
+      "引用卡片：点标记看条目，按钮才跳转"],
+     "特色：证据面板、拦截列表、引用卡片"),
 ]
-for title, subtitle, points, label in FEATURES:
+
+for title, intro, points, label in FEATURES:
     slide = page(title, 2)
-    textbox(slide, 0.62, 2.35, 8.6, 0.45, subtitle, size=17, color=MUTED)
-    bars(slide, 0.70, 2.95, 8.2, points, size=19, gap=1.6)
-    video_frame(slide, 9.2, 2.45, 10.3, 5.8, label)
+    lead(slide, intro, size=17, y=2.55, w=8.7)
+    bars(slide, 0.70, 4.45, 8.3, points, size=18, gap=1.30)
+    video_frame(slide, 9.30, 2.35, 10.2, 5.75, label)
 
-slide = page("特色：证据链与引用卡片", 2)
-textbox(slide, 0.62, 2.35, 8.6, 0.45, "可信度落在这两处", size=17, color=MUTED)
-bars(slide, 0.70, 2.95, 8.2, [
-    "取证与生成分离，证据是两者唯一接口",
-    "引用对齐到字符区间，摘除无据引用",
-    "空答案判失败，翻倍预算重试",
-    "引用卡片：点标记看条目，按钮才跳转",
-], size=19, gap=1.6)
-video_frame(slide, 9.2, 2.45, 10.3, 5.8, "特色：证据面板、拦截列表、引用卡片")
-
-# --------------------------------------------------------------- 实测数据
-slide = page("实测数据", 3)
-three_line_table(slide, 0.95, 2.4, 18.1, [
-    ["指标", "实测值", "说明"],
-    ["忠实度", "0.8034", "三轮 0.7898 – 0.8168，标准差 0.0110"],
-    ["引用可溯源率", "1.0000", "104 条支持的断言全部指向字符区间"],
-    ["上下文精确率", "0.2791", "偏低的原因与改进方向见技术文档 §6.3"],
-    ["库外对照题", "3/3", "全部诚实拒答，0 条编造"],
+# ------------------------------------------------ 15. 实验
+slide = page("实验：数据、指标与理由", 3)
+lead(slide, "在一套冻结的十五篇文献库（461 页）上跑三轮取均值。指标沿用学术问答评测的通行做法："
+            "忠实度与引用可溯源率参照 OpenScholar（Nature 650:857–863），"
+            "检索用 top-5 命中率，拒答能力另设库外对照题。",
+     size=16, y=2.55, w=18.4)
+three_line_table(slide, 0.90, 4.35, 18.2, [
+    ["指标", "实测值", "含义与来源"],
+    ["忠实度", "0.8034", "答案断言被引用段落支持的比例；三轮 0.7898–0.8168"],
+    ["引用可溯源率", "1.0000", "104 条断言全部指向字符区间"],
+    ["上下文精确率", "0.2791", "检索段落中含答案的比例；偏低，见文档 §6.3"],
+    ["库外对照题", "3/3", "题面不在库内，全部诚实拒答，零编造"],
     ["检索命中率 top-5", "1.0000", "元数据感知检索后由 0.9286 提升"],
     ["结构化解析", "149.4 秒", "541 页书籍，1254 章节，131 万字符"],
-], col_widths=[6.4, 3.4, 8.3], header_size=20, body_size=19, row_height=0.8)
-textbox(slide, 0.95, 8.55, 18.1, 0.6,
-        "测试：容器内 227 通过 / 9 跳过；有真实 PDF 与权重的主机上 236 通过，耗时 52 秒",
-        size=15, color=MUTED)
+], col_widths=[4.6, 2.6, 11.0], header_size=19, body_size=17, row_height=0.72)
+textbox(slide, 0.90, 9.42, 18.2, 0.7,
+        "为什么用这几个指标：忠实度衡量「有没有编」，可溯源率衡量「能不能查」，"
+        "命中率衡量「找得准不准」，对照题衡量「敢不敢说不知道」。",
+        size=13.5, color=INK, spacing=1.3)
 
-# --------------------------------------------------------------- 创新点
+# ------------------------------------------------ 16. 创新点
 slide = page("创新点", 3)
-textbox(slide, 0.75, 2.5, 8.9, 0.5, "技术创新", size=24, bold=True)
-bars(slide, 0.75, 3.15, 8.9, [
-    "取证与生成分离的两阶段编排，以证据为契约",
-    "按断言级的引用对齐修复，引文与指标同源",
-    "图论联合判定基石，规则化矛盾检测",
+lead(slide, "创新分两层：一是把「可信」做成可检查的机制，二是让阅读这件事真正变得可用。",
+     size=20, y=2.55, w=18.4)
+textbox(slide, 0.70, 3.55, 8.9, 0.55, "技术创新", size=23, bold=True)
+bars(slide, 0.70, 4.20, 8.9, [
+    "两阶段取证生成：证据是契约，不是提示词",
+    "断言级引用对齐：每条结论统一到字符区间",
+    "图论联合判基石：四指标投票与矛盾检测",
 ], size=21, gap=1.35)
-textbox(slide, 10.4, 2.5, 8.6, 0.5, "应用创新", size=24, bold=True)
-bars(slide, 10.4, 3.15, 8.6, [
+textbox(slide, 10.30, 3.55, 8.6, 0.55, "应用创新", size=23, bold=True)
+bars(slide, 10.30, 4.20, 8.6, [
     "重排阅读：表格可选中、公式可排版",
-    "中英逐句对照，悬停即见原句",
-    "引用卡片与锚点，读者可当场核对",
+    "中英逐句对照：悬停即见英文原句",
+    "引用卡片：先看条目，再决定跳转",
 ], size=21, gap=1.35)
-textbox(slide, 0.75, 7.5, 18.3, 1.8,
-        "明确不做：多智能体角色扮演层。Agent Laboratory 报告模型评审系统性高估自身产出"
-        "（自评 6.1/10，人类 3.8/10），角色越多越难发现问题；本项目宁可少报，不报错。",
-        size=18, spacing=1.5)
+textbox(slide, 0.70, 8.55, 18.4, 1.4,
+        "明确不做：多智能体角色扮演层。多角色互评会让模型系统性高估自身产出，"
+        "本项目宁可少报，不报错。",
+        size=19, spacing=1.35)
 
-# --------------------------------------------------------------- 总结与展望
-slide = page("总结与展望", 3)
-textbox(slide, 0.75, 2.5, 18.3, 7.6,
-        "已完成\n"
-        "　　六个工作台覆盖检索、精读、对比、综述与写作；论文的每个结论都能回原文\n"
-        "　　15 篇文献的库上，结构审计 15/15 通过，译文覆盖 99.4% 以上\n\n"
-        "后续\n"
-        "　　公式改为可检索的符号表达\n"
-        "　　跨境文献源接入，扩大可用语料\n"
-        "　　多用户并发与权限，支持团队共用",
-        size=22, spacing=1.55)
+# ------------------------------------------------ 17. 总结与展望
+slide = page("总结与展望：赛题要求与完成情况", 3)
+lead(slide, "对照赛题要求的六项能力，逐条说明做到什么程度。",
+     size=18, y=2.55, w=18.4)
+three_line_table(slide, 0.90, 3.55, 18.2, [
+    ["赛题要求", "完成情况"],
+    ["文献解析与结构化", "15 篇 / 461 页；标题、表格、公式、参考文献全部结构化"],
+    ["检索与问答", "两阶段取证作答，引用可溯源率 1.0000"],
+    ["阅读与翻译", "重排阅读 + 中英逐句对照，译文覆盖 99.4% 以上"],
+    ["知识图谱与综述", "15 节点 / 14 条引用边，基石识别、矛盾检测、综述生成"],
+    ["写作辅助", "论文框架、架构图、CSV 图表；幻觉引用拦截并展示"],
+    ["部署与开源", "公开仓库、在线演示、27 页技术文档，测试 236 通过"],
+], col_widths=[5.6, 12.6], header_size=19, body_size=17, row_height=0.78)
+textbox(slide, 0.90, 9.20, 18.2, 1.4,
+        "后续三件事：公式改为可检索的符号表达；接入更多文献来源，扩大可用语料；"
+        "多用户并发与权限，支持团队共用。",
+        size=16, spacing=1.35)
 
 # ------------------------------------------------------------------ 谢谢
 slide = prs.slides.add_slide(prs.slide_layouts[6])
