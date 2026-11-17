@@ -572,34 +572,59 @@ export default function Reader() {
 
   /* -------------------------------------------------- citation navigation */
   // Clicking a marker shows the entry it points at; the jump happens only when
-  // the reader asks for it.  A marker is a reference to something, so showing
-  // the reference is the expected result of the click, and moving the page
-  // under the reader is a separate decision.
-  const [citeCard, setCiteCard] = useState<{ n: string; text: string } | null>(null)
+  // the reader asks for it.  Two citation styles arrive here: the numeric
+  // marker (`12`) and the author-year one (`ay:dai|2015`).
+  const [citeCard, setCiteCard] = useState<{
+    label: string
+    text: string
+    refId?: string
+  } | null>(null)
 
   const openCitation = useCallback(
     (marker: string) => {
-      const n = String(marker).split(/[,;\s-]/)[0]
-      const fromDocument = paperDoc?.blocks.find(
-        (block) => block.kind === 'reference' && block.number === n,
+      const references = (paperDoc?.blocks ?? []).filter(
+        (block) => block.kind === 'reference',
       )
+      if (marker.startsWith('ay:')) {
+        const [surname, year] = marker.slice(3).split('|')
+        // A bibliography entry starts with its authors and carries the year
+        // early on, so both are looked for in the head of the entry only —
+        // a bare search anywhere would match a cited name in the title.
+        const hit = references.find((block) => {
+          const text = (block.text ?? '').toLowerCase()
+          const head = text.slice(0, 90)
+          return head.includes(surname) && text.slice(0, 140).includes(year)
+        })
+        setCiteCard({
+          label: `${surname} ${year}`,
+          text: hit?.text ?? '这条引用在参考文献里没有找到对应的条目',
+          refId: hit?.id,
+        })
+        return
+      }
+      const n = String(marker).split(/[,;\s-]/)[0]
+      const fromDocument = references.find((block) => block.number === n)
       if (fromDocument) {
-        setCiteCard({ n, text: fromDocument.text ?? '' })
+        setCiteCard({ label: `[${n}]`, text: fromDocument.text ?? '', refId: fromDocument.id })
         return
       }
       if (!id) return
       api
         .reference(id, Number.parseInt(n, 10))
-        .then((ref) => setCiteCard({ n, text: String(ref.raw_text ?? '') }))
+        .then((ref) =>
+          setCiteCard({ label: `[${n}]`, text: String(ref.raw_text ?? '') }),
+        )
         .catch(() => setToast(`文献库中没有 [${n}] 这一条`))
     },
     [id, paperDoc],
   )
 
-  const scrollToReference = (n: string) => {
-    const el = document.querySelector<HTMLElement>(`[data-cite="${n}"]`)
+  const scrollToReference = (target: { refId?: string; label: string }) => {
+    const el = target.refId
+      ? document.getElementById(target.refId)
+      : document.querySelector<HTMLElement>(`[data-cite="${target.label}"]`)
     if (!el) {
-      setToast(`参考文献 [${n}] 不在本文中`)
+      setToast(`参考文献里没有 ${target.label}`)
       return
     }
     el.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -879,7 +904,7 @@ export default function Reader() {
       <Modal
         open={citeCard !== null}
         onClose={() => setCiteCard(null)}
-        title={citeCard ? `引用 [${citeCard.n}]` : '引用'}
+        title={citeCard ? `引用 ${citeCard.label}` : '引用'}
       >
         {citeCard && (
           <div className="space-y-3">
@@ -893,7 +918,7 @@ export default function Reader() {
               <button
                 className="btn-primary !py-1 !text-[12px]"
                 onClick={() => {
-                  scrollToReference(citeCard.n)
+                  scrollToReference(citeCard)
                   setCiteCard(null)
                 }}
               >

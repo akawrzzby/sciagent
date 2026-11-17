@@ -31,6 +31,39 @@ import type { DocSentence, ReadLang } from '../../lib/document'
 /** `[12]`, `[3,4]`, `[7, 8]`, `[1-3]`, `[1–3]` — a bracket with only citations. */
 const CITATION = /\[(\d{1,3}(?:\s*[,;，、\-–]\s*\d{1,3})*)\]/g
 
+/** `(Dai and Le, 2015; Peters et al., 2018a)` — the author-year style. */
+const PAREN = /\(([^()]{4,240})\)/g
+
+/**
+ * One part of an author-year group.  A surname may be several words
+ * (`Tjong Kim Sang`), and it may be followed by a second name or `et al.`.
+ */
+const NAME = "[A-Z][\\p{L}'’\\-]+"
+const AUTHOR_YEAR = new RegExp(
+  `^(${NAME}(?:\\s+${NAME})*?)(?:\\s+(?:and|&)\\s+${NAME}(?:\\s+${NAME})*|\\s+et\\s+al\\.?)?\\s*,?\\s*((?:19|20)\\d{2}[a-z]?)$`,
+  'u',
+)
+
+interface AuthorYearPart {
+  text: string
+  marker: string
+}
+
+/** Parse the inside of a parenthesis as an author-year citation group. */
+function parseAuthorYear(inner: string): AuthorYearPart[] | null {
+  const parts = inner.split(/\s*;\s*/).filter(Boolean)
+  if (parts.length === 0) return null
+  const parsed: AuthorYearPart[] = []
+  for (const part of parts) {
+    const match = AUTHOR_YEAR.exec(part.trim())
+    if (!match) return null
+    const surname = match[1].toLowerCase()
+    const year = match[2].toLowerCase()
+    parsed.push({ text: part.trim(), marker: `ay:${surname}|${year}` })
+  }
+  return parsed
+}
+
 export interface SentenceTextProps {
   /** Sentence pairs of the block; the preferred source for `zh`/`both`. */
   sentences?: DocSentence[]
@@ -73,36 +106,74 @@ function withCitations(value: string, onCite?: (marker: string) => void): ReactN
   const nodes: ReactNode[] = []
   let cursor = 0
   let key = 0
+
+  const citation = (label: string, marker: string) =>
+    onCite ? (
+      <button
+        key={`cite-${key++}`}
+        type="button"
+        className="doc-cite"
+        data-cite={marker}
+        aria-label={`参考文献 ${label}`}
+        onClick={(event) => {
+          event.stopPropagation()
+          onCite(marker)
+        }}
+      >
+        {label}
+      </button>
+    ) : (
+      <span key={`cite-${key++}`} className="doc-cite doc-cite-static" data-cite={marker}>
+        {label}
+      </span>
+    )
+
+  // Both citation styles are collected first, then walked in reading order.
+  const found: { index: number; length: number; node: ReactNode }[] = []
+
   CITATION.lastIndex = 0
   let match = CITATION.exec(value)
   while (match !== null) {
-    if (match.index > cursor) nodes.push(value.slice(cursor, match.index))
-    const raw = match[0]
     const marker = match[1].replace(/\s+/g, '')
-    const chip = raw.slice(1, -1)
-    nodes.push(
-      onCite ? (
-        <button
-          key={`cite-${key++}`}
-          type="button"
-          className="doc-cite"
-          data-cite={marker}
-          aria-label={`参考文献 ${marker}`}
-          onClick={(event) => {
-            event.stopPropagation()
-            onCite(marker)
-          }}
-        >
-          {chip}
-        </button>
-      ) : (
-        <span key={`cite-${key++}`} className="doc-cite doc-cite-static" data-cite={marker}>
-          {chip}
-        </span>
-      ),
-    )
-    cursor = match.index + raw.length
+    found.push({
+      index: match.index,
+      length: match[0].length,
+      node: citation(match[0].slice(1, -1), marker),
+    })
     match = CITATION.exec(value)
+  }
+
+  PAREN.lastIndex = 0
+  let group = PAREN.exec(value)
+  while (group !== null) {
+    const parts = parseAuthorYear(group[1])
+    if (parts) {
+      found.push({
+        index: group.index,
+        length: group[0].length,
+        node: (
+          <span key={`ay-${key++}`} className="doc-cite-group">
+            (
+            {parts.map((part, position) => (
+              <span key={part.marker}>
+                {position > 0 ? '; ' : ''}
+                {citation(part.text, part.marker)}
+              </span>
+            ))}
+            )
+          </span>
+        ),
+      })
+    }
+    group = PAREN.exec(value)
+  }
+
+  found.sort((left, right) => left.index - right.index)
+  for (const item of found) {
+    if (item.index < cursor) continue // overlapping match, already emitted
+    if (item.index > cursor) nodes.push(value.slice(cursor, item.index))
+    nodes.push(item.node)
+    cursor = item.index + item.length
   }
   if (cursor < value.length) nodes.push(value.slice(cursor))
   return nodes
