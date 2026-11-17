@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Module 5 — the citation-graph and review workbench.
  *
  * The graph is rendered with Cytoscape. Node role (foundation / core /
@@ -384,7 +384,7 @@ export default function GraphWorkbench() {
         <div>
           <h1 className="font-serif text-xl font-semibold tracking-tight">图谱综述</h1>
           <p className="mt-0.5 font-sans text-xs text-ink-500 dark:text-ink-400">
-            PageRank · Betweenness · k-core 基石识别 · 文献综述 · Future Work 提取
+            按引用关系识别奠基论文，并生成综述与后续研究方向
             {selected.length > 0 && ` · 范围：${selected.length} 篇已选`}
           </p>
         </div>

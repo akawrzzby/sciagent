@@ -458,11 +458,26 @@ def _strip_trailing_commas(text: str) -> str:
 
 
 _client: LLMClient | None = None
+_client_signature: tuple[str, str, str] | None = None
 
 
 def get_llm_client() -> LLMClient:
-    """Return the process-wide LLM client."""
-    global _client
-    if _client is None:
-        _client = LLMClient()
+    """Return the process-wide LLM client, rebuilt when the active model changes.
+
+    The active endpoint can be switched from the interface, so the client is
+    keyed by the endpoint it was built for: a stale client would keep answering
+    from the model the operator just replaced.
+    """
+    global _client, _client_signature
+    from app.llm import providers
+
+    profile = providers.active()
+    signature = (profile.base_url, profile.model, profile.api_key) if profile else None
+    if _client is None or signature != _client_signature:
+        if profile is not None:
+            _client = LLMClient(base_url=profile.base_url, model=profile.model,
+                                api_key=profile.api_key)
+        else:
+            _client = LLMClient()
+        _client_signature = signature
     return _client

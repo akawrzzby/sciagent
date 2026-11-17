@@ -108,6 +108,7 @@ def create_app() -> FastAPI:
         admin,
         graph,
         health,
+        models,
         papers,
         rag,
         reader,
@@ -119,7 +120,8 @@ def create_app() -> FastAPI:
 
     # ``translation`` is registered before ``reader`` on purpose: both expose
     # ``/api/reader/{paper_id}/translation`` and the first match wins.
-    for module in (health, papers, rag, translation, reader, search, graph, writing, viz, admin):
+    for module in (health, models, papers, rag, translation, reader, search, graph, writing,
+                   viz, admin):
         app.include_router(module.router, prefix="/api")
     from app.api.routers import document
     app.include_router(document.router, prefix="/api")

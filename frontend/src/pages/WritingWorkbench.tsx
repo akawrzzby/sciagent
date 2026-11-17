@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Module 6 — the academic writing workbench.
  *
  * Three capabilities, each one a hard requirement of the task statement:
@@ -168,7 +168,7 @@ export default function WritingWorkbench() {
         <div>
           <h1 className="font-serif text-xl font-semibold tracking-tight">写作工作台</h1>
           <p className="mt-0.5 font-sans text-xs text-ink-500 dark:text-ink-400">
-            论文框架 · 引用真实性校验 · TikZ/Mermaid/Graphviz 架构图 · CSV 转学术图表与 Figure Caption
+            生成论文框架与架构图，核对引用，把数据画成图表
           </p>
         </div>
         <Tabs<Panel>

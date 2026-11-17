@@ -225,6 +225,16 @@ export interface CitationGraph {
   stats: Record<string, number | string | boolean>
 }
 
+/** One OpenAI-compatible endpoint the app can talk to. */
+export interface ModelProfile {
+  id: string
+  label: string
+  base_url: string
+  model: string
+  has_key: boolean
+  key_hint: string
+}
+
 export interface LibraryStats {
   papers: number
   pages: number
@@ -280,6 +290,19 @@ export const api = {
   /* ---- health ---- */
   health: () => request<Record<string, unknown>>('/health'),
   config: () => request<Record<string, unknown>>('/config'),
+
+  /* ---- model endpoints ---- */
+  models: () => request<{ active: string | null; profiles: ModelProfile[] }>('/models'),
+  addModel: (body: { label: string; base_url: string; model: string; api_key: string }) =>
+    request<ModelProfile>('/models', { method: 'POST', body: JSON.stringify(body) }),
+  activateModel: (id: string) =>
+    request<{ active: string }>(`/models/${id}/activate`, { method: 'POST' }),
+  deleteModel: (id: string) => request<{ deleted: string }>(`/models/${id}`, { method: 'DELETE' }),
+  probeModel: (body: { base_url: string; model?: string; api_key?: string }) =>
+    request<{ ok: boolean; models?: string[]; error?: string }>('/models/probe', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   /* ---- library ---- */
   listPapers: (q = '') => request<{ papers: Paper[]; count: number }>(`/papers?q=${encodeURIComponent(q)}`),

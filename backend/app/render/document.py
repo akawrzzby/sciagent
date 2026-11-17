@@ -479,6 +479,73 @@ def _centre_inside(inner: list[float], outer: list[float], pad: float = 2.0) -> 
             and outer[1] - pad <= cy <= outer[3] + pad)
 
 
+#: A caption starts with the object it belongs to: ``Figure 3``, ``Table 2``.
+_CAPTION_START = re.compile(r"^(?:figure|table)\s*\d+", re.IGNORECASE)
+
+#: How far a caption may sit from its object and still belong to it, in points.
+_CAPTION_REACH = 120.0
+
+
+def _fill_missing_captions(blocks: list[Block], raw: list[dict[str, Any]],
+                           segments: _Segments) -> set[str]:
+    """Attach a caption to the figures and tables the parse left without one.
+
+    The caption is a content block of its own, and pairing it with its object
+    is a separate step upstream that does not always succeed.  Here the caption
+    block is looked up by page and by distance: the closest "Figure n" or
+    "Table n" paragraph above or below the object.  Returns the texts that were
+    consumed, so they are not printed a second time as paragraphs.
+    """
+    captions = [b for b in raw if str(b.get("type") or "").lower() == "caption"]
+    used: set[str] = set()
+    for block in blocks:
+        if block.kind not in ("figure", "table") or block.caption.strip():
+            continue
+        if len(block.bbox) < 4:
+            continue
+        best: tuple[str, dict[str, Any]] | None = None
+        best_gap = _CAPTION_REACH
+        for caption in captions:
+            if _page(caption) != block.page_no:
+                continue
+            text = _normalise(caption.get("content") or "")
+            if not _CAPTION_START.match(text):
+                continue
+            box = _bbox(caption.get("bbox"))
+            if len(box) < 4:
+                continue
+            # a table caption sits above its table, a figure caption below
+            gap = min(abs(box[1] - block.bbox[3]), abs(block.bbox[1] - box[3]))
+            if gap < best_gap:
+                best, best_gap = (text, caption), gap
+        if best is not None:
+            text, _ = best
+            block.caption = text
+            block.caption_target = segments.target(text)
+            used.add(text.lower())
+    return used
+
+
+def _drop_page_images(blocks: list[Block]) -> list[Block]:
+    """Remove the "figures" that are really whole pages.
+
+    A scanned paper is parsed page by page, and the rasteriser records each
+    page as a figure: the box starts at the origin and covers the whole sheet,
+    and there is no caption because the page is not a figure.  Shown as
+    figures they would print every page twice.
+    """
+    kept: list[Block] = []
+    for block in blocks:
+        if (block.kind == "figure" and not block.caption.strip()
+                and len(block.bbox) >= 4
+                and block.bbox[0] <= 2 and block.bbox[1] <= 2
+                and (block.bbox[2] - block.bbox[0]) >= 480
+                and (block.bbox[3] - block.bbox[1]) >= 660):
+            continue
+        kept.append(block)
+    return kept
+
+
 def _drop_shadowed(blocks: list[Block]) -> list[Block]:
     """Remove the blocks that would print the same content twice.
 
@@ -579,6 +646,11 @@ async def build_document(paper_id: str, lang: str = "zh") -> Document | None:
     blocks.extend(_table_block(table, paper_id, segments) for table in tables)
     blocks.extend(_figure_block(figure, paper_id, segments) for figure in figures)
     blocks.extend(_formula_block(formula, paper_id) for formula in formulas)
+    borrowed = _fill_missing_captions(blocks, list(structure.get("blocks") or []), segments)
+    if borrowed:
+        blocks = [b for b in blocks
+                  if not (b.kind == "paragraph" and _normalise(b.text).lower() in borrowed)]
+    blocks = _drop_page_images(blocks)
     blocks = _drop_shadowed(blocks)
     blocks = _sort_by_layout(blocks)
 

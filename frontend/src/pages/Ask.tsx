@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Module 2 — the anti-hallucination Q&A workbench.
  *
  * The agent stream is rendered live:
@@ -219,7 +219,7 @@ export default function Ask() {
         <div>
           <h1 className="font-serif text-xl font-semibold tracking-tight">文献问答</h1>
           <p className="mt-0.5 font-sans text-xs text-ink-500 dark:text-ink-400">
-            Router → Planner → Tool Calling → 证据绑定 → 流式作答 · {scopeLabel}
+            先检索取证，再依据证据作答。{scopeLabel}
           </p>
         </div>
         <button
