@@ -148,6 +148,8 @@ async def review(req: ReviewRequest) -> dict:
     )
 
     llm = get_llm_client()
+    # Structured output: the answer has to be JSON, and a long reasoning pass
+    # over a whole library spends the token budget before it writes any.
     payload, raw = await llm.complete_json(
         prompts.SYSTEM_REVIEW,
         f"GRAPH METRICS\n{metrics}\n\nKEY PAPER EVIDENCE\n" + "\n\n".join(evidence),
@@ -157,6 +159,7 @@ async def review(req: ReviewRequest) -> dict:
             '"derivative_papers": [{"title": "string", "contribution": "string"}], '
             '"open_questions": ["string"]}'
         ),
+        thinking=False,
         purpose="review",
     )
     if not payload:

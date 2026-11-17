@@ -302,11 +302,16 @@ class LLMClient:
         purpose: str = "json",
         temperature: float = 0.1,
         max_tokens: int | None = None,
+        thinking: bool | None = None,
     ) -> tuple[dict[str, Any] | None, str]:
         """Ask for a JSON object and parse it robustly.
 
         Returns ``(parsed_or_None, raw_text)``.  The helper strips markdown code
         fences and repairs common model mistakes (single quotes, trailing commas).
+
+        ``thinking`` disables the reasoning channel.  A structured answer over a
+        large prompt can spend the whole token budget reasoning and then emit
+        nothing, which parses as "the model did not return JSON".
         """
         instruction = (
             "Respond with a single JSON object and nothing else. "
@@ -320,7 +325,7 @@ class LLMClient:
             {"role": "user", "content": f"{instruction}\n\n{user}"},
         ]
         resp = await self.chat(messages, temperature=temperature, max_tokens=max_tokens,
-                               session_id=session_id, purpose=purpose)
+                               session_id=session_id, purpose=purpose, thinking=thinking)
         return extract_json(resp.content), resp.content
 
     async def _audit(self, session_id: str, purpose: str, messages: list[dict[str, Any]],

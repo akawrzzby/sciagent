@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Module 5 — the citation-graph and review workbench.
  *
  * The graph is rendered with Cytoscape. Node role (foundation / core /
@@ -325,7 +325,15 @@ export default function GraphWorkbench() {
     setBusyPanel('review')
     setToast(null)
     try {
-      const r = (await api.review(selected.map((p) => p.id))) as ReviewResult
+      const r = (await api.review(selected.map((p) => p.id))) as ReviewResult & {
+        error?: string
+      }
+      // The backend answers 200 with an `error` field when the model did not
+      // return JSON; showing an empty panel would look like an empty field.
+      if (r.error) {
+        setToast(`综述生成失败：${r.error}`)
+        return
+      }
       setReview(r)
     } catch (e) {
       setToast(`综述生成失败：${(e as Error).message}`)

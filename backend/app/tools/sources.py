@@ -59,9 +59,26 @@ class ArxivPaper:
         }
 
 
+class UpstreamUnavailable(RuntimeError):
+    """arXiv or GitHub did not answer.
+
+    A search box cannot do anything with a socket timeout, and letting it
+    surface as a 500 tells the operator nothing.  This carries the upstream
+    host so the route can answer with a sentence instead.
+    """
+
+
 async def _get(client: httpx.AsyncClient, url: str, params: dict | None = None) -> httpx.Response:
-    r = await client.get(url, params=params, headers={"User-Agent": _USER_AGENT})
-    r.raise_for_status()
+    host = url.split("/")[2] if "//" in url else url
+    try:
+        r = await client.get(url, params=params, headers={"User-Agent": _USER_AGENT})
+        r.raise_for_status()
+    except httpx.TimeoutException as exc:
+        raise UpstreamUnavailable(f"{host} 响应超时") from exc
+    except httpx.HTTPStatusError as exc:
+        raise UpstreamUnavailable(f"{host} 返回 {exc.response.status_code}") from exc
+    except httpx.HTTPError as exc:
+        raise UpstreamUnavailable(f"无法连接 {host}") from exc
     return r
 
 

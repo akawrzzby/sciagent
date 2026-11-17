@@ -37,8 +37,16 @@ class FeedbackRequest(BaseModel):
 
 @router.post("/arxiv")
 async def search_arxiv(req: SearchRequest) -> dict:
-    """Search arXiv."""
-    papers = await sources.arxiv_search(req.query, req.max_results)
+    """Search arXiv.
+
+    arXiv is external and occasionally slow; an upstream timeout is reported as
+    503 with the reason, so the interface can say "arXiv 暂时不可用" instead of
+    showing a bare server error.
+    """
+    try:
+        papers = await sources.arxiv_search(req.query, req.max_results)
+    except sources.UpstreamUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"query": req.query, "count": len(papers),
             "papers": [p.to_dict() for p in papers]}
 
@@ -62,7 +70,10 @@ async def download(req: DownloadRequest) -> dict:
 @router.get("/recent")
 async def recent(category: str = "cs.CL", max_results: int = 30) -> dict:
     """The latest submissions of an arXiv category (for periodic tracking)."""
-    papers = await sources.arxiv_recent(category, max_results)
+    try:
+        papers = await sources.arxiv_recent(category, max_results)
+    except sources.UpstreamUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"category": category, "count": len(papers),
             "papers": [p.to_dict() for p in papers]}
 
@@ -95,7 +106,10 @@ async def recommend(payload: dict[str, Any] | None = None) -> dict:
         keywords.extend(_tokenize(p["title"]))
     profile = " ".join(keywords[:120])
 
-    candidates = await sources.arxiv_search(profile or "machine learning", 30)
+    try:
+        candidates = await sources.arxiv_search(profile or "machine learning", 30)
+    except sources.UpstreamUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     scored: list[dict[str, Any]] = []
 
     feedback = await _feedback_map()
