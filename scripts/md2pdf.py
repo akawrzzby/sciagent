@@ -135,6 +135,19 @@ td { padding: 2.5pt 4pt; border: 1px solid var(--rule); vertical-align: top; }
 tr:nth-child(even) td { background: #fafbfd; }
 a { color: var(--accent); text-decoration: none; }
 img { max-width: 100%; }
+figure {
+  margin: 5pt 0 6pt 0;
+  text-align: center;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+figure img { width: 94%; }
+figcaption {
+  margin-top: 2pt;
+  font-family: "Inter", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  font-size: 7.2pt;
+  color: var(--ink-faint);
+}
 .cover {
   min-height: 235mm;
   display: flex;
@@ -163,6 +176,7 @@ INLINE_CODE = re.compile(r"`([^`]+)`")
 BOLD = re.compile(r"\*\*([^*]+)\*\*")
 ITALIC = re.compile(r"(?<![*\w])\*([^*\n]+)\*(?!\*)")
 LINK = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+IMAGE = re.compile(r"^!\[([^\]]*)\]\(([^)]+)\)$")
 
 
 def inline(text: str) -> str:
@@ -291,6 +305,17 @@ def markdown_to_html(md: str) -> str:
             level = len(m.group(1))
             text = m.group(2).strip()
             out.append(f"<h{level}>{inline(text)}</h{level}>")
+            i += 1
+            continue
+
+        # ---- figure -------------------------------------------------------
+        m = IMAGE.match(stripped)
+        if m:
+            alt, src = m.group(1), m.group(2)
+            out.append(
+                f'<figure><img src="{html.escape(src)}" alt="{html.escape(alt)}"/>'
+                f"<figcaption>{inline(alt)}</figcaption></figure>"
+            )
             i += 1
             continue
 
