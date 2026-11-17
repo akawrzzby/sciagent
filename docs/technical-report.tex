@@ -727,7 +727,7 @@ latency_ms=213786  resp_len=0  reason_len=8000
 
 根本性的修复在于避免预算被推理通道占用。Qwen3 的对话模板提供推理开关，本文将其配置化，分为 Agent 阶段与答案阶段两项。Agent 阶段的推理决定工具序列的合理性，且会流式呈现为界面的思考面板，故予以保留；答案阶段的证据已在提示之中，故默认关闭。同一道题的实测结果如下。
 
-\begin{longtable}{@{}p{0.07\textwidth}p{0.26\textwidth}p{0.15\textwidth}p{0.17\textwidth}p{0.27\textwidth}@{}}
+\begin{longtable}{@{}p{0.12\textwidth}p{0.23\textwidth}p{0.21\textwidth}p{0.19\textwidth}p{0.19\textwidth}@{}}
 \toprule
 \textbf{答案阶段} & \textbf{耗时} & \textbf{补全令牌} & \textbf{正文} & \textbf{推理} \\
 \midrule
@@ -1088,7 +1088,7 @@ T46 & 两栏不误并公式 & 左右两栏各自的公式不被跨栏合并 & �
 
 分题结果如下，取三轮均值：
 
-\begin{longtable}{@{}p{0.07\textwidth}p{0.26\textwidth}p{0.15\textwidth}p{0.17\textwidth}p{0.27\textwidth}@{}}
+\begin{longtable}{@{}p{0.12\textwidth}p{0.23\textwidth}p{0.21\textwidth}p{0.19\textwidth}p{0.19\textwidth}@{}}
 \toprule
 \textbf{类型} & \textbf{题目} & \textbf{faithfulness} & \textbf{context\_precision} & \textbf{断言数} \\
 \midrule

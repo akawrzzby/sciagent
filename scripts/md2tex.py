@@ -194,8 +194,8 @@ def table_tex(header: list[str], rows: list[list[str]]) -> str:
     elif columns == 4:
         spec = r"@{}p{0.10\textwidth}p{0.34\textwidth}p{0.30\textwidth}p{0.18\textwidth}@{}"
     elif columns == 5:
-        spec = (r"@{}p{0.07\textwidth}p{0.26\textwidth}p{0.15\textwidth}"
-                r"p{0.17\textwidth}p{0.27\textwidth}@{}")
+        spec = (r"@{}p{0.12\textwidth}p{0.23\textwidth}p{0.21\textwidth}"
+                r"p{0.19\textwidth}p{0.19\textwidth}@{}")
     else:
         width = 0.94 / columns
         spec = "@{}" + "".join(f"p{{{width:.3f}\\textwidth}}" for _ in range(columns)) + "@{}"
