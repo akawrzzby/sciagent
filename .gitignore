@@ -77,3 +77,10 @@ scripts/try_api_routes.py
 # 因此文件只留在本地；等 PAT 补上 scope 后删掉这两行即可入库。
 # 等价的可复现方案已在仓库内：scripts/ci_docker_test.sh
 .github/
+
+# ---- LaTeX 构建中间产物 ----
+*.aux
+*.log
+*.toc
+*.out
+*.synctex.gz

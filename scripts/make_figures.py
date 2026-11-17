@@ -40,6 +40,16 @@ ZONE_GREEN = "#ecf5ee"
 ZONE_PURPLE = "#f1edf9"
 ZONE_GREY = "#f4f6f9"
 
+# Coloured header bars, in the manner of an overview figure: a solid band on top
+# of a very light body.
+TONES = {
+    "blue":    {"head": "#3f6fb5", "body": "#f2f6fc", "edge": "#b9c9e2"},
+    "purple":  {"head": "#6d4fa3", "body": "#f6f3fb", "edge": "#cabfe4"},
+    "green":   {"head": "#3f8f6a", "body": "#f1f8f4", "edge": "#b6d8c6"},
+    "amber":   {"head": "#c07a2c", "body": "#fdf6ef", "edge": "#e8c9a8"},
+    "grey":    {"head": "#5b6b80", "body": "#f6f8fa", "edge": "#ccd6e0"},
+}
+
 FONT = "'Microsoft YaHei','Segoe UI',sans-serif"
 
 
@@ -98,13 +108,19 @@ def elbow(x1, y1, x2, y2, *, stroke=SOFT, sw=1.8, mid=None, dash=None):
     )
 
 
-def zone(x, y, w, h, title, *, fill=ZONE_GREY, edge=LINE, icon="", pad=12):
-    """Tinted panel with a small header pill."""
-    out = [rect(x, y, w, h, fill=fill, stroke=edge, sw=1.2, r=16)]
-    pill_w = max(120, 16 * len(title) + 34)
-    out.append(rect(x + pad, y - 16, pill_w, 32, fill=WHITE, stroke=edge, sw=1.2, r=16))
-    label = f"{icon} {title}".strip()
-    out.append(text(x + pad + pill_w / 2, y + 1, label, size=17, weight="bold", fill=SOFT))
+def zone(x, y, w, h, title, *, tone="grey", r=12, bar=40):
+    """Panel with a solid coloured header bar and a very light body."""
+    colours = TONES.get(tone, TONES["grey"])
+    head, body, edge = colours["head"], colours["body"], colours["edge"]
+    out = [rect(x, y, w, h, fill=body, stroke=edge, sw=1.3, r=r)]
+    # header bar: rounded on the top two corners only
+    out.append(
+        f'<path d="M {x + r} {y} H {x + w - r} A {r} {r} 0 0 1 {x + w} {y + r} '
+        f'V {y + bar} H {x} V {y + r} A {r} {r} 0 0 1 {x + r} {y} Z" '
+        f'fill="{head}"/>'
+    )
+    out.append(text(x + 18, y + bar / 2 + 1, title, size=18, weight="bold",
+                    fill="#ffffff", anchor="start"))
     return "".join(out)
 
 
@@ -255,10 +271,10 @@ def render(svg_path: pathlib.Path, *, scale: int = 3) -> pathlib.Path:
 
 # ----------------------------------------------------------------------- fig 1
 def fig_arch() -> None:
-    f = Figure(1560, 900, "fig-arch")
+    f = Figure(1560, 935, "fig-arch")
 
     # ---- zone A: presentation
-    f.add(zone(40, 60, 1480, 150, "展现层 · 六个工作台", fill=ZONE_BLUE))
+    f.add(zone(40, 60, 1480, 150, "展现层 · 六个工作台", tone="blue"))
     benches = ["文献库", "阅读器", "问答", "图谱", "检索", "写作"]
     for index, name in enumerate(benches):
         x = 110 + index * 235
@@ -267,7 +283,7 @@ def fig_arch() -> None:
         f.add(text(x + 95, 122 + 52, "React 组件", size=14, fill=FAINT))
 
     # ---- zone B: orchestration
-    f.add(zone(40, 275, 1480, 215, "编排层 · Agent 两阶段", fill=ZONE_ORANGE))
+    f.add(zone(40, 275, 1480, 215, "编排层 · Agent 两阶段", tone="amber"))
     stages = [
         ("Router", "意图路由", agent),
         ("Planner", "任务 DAG", agent),
@@ -290,7 +306,7 @@ def fig_arch() -> None:
                size=15, fill=SOFT))
 
     # ---- zone C: capabilities
-    f.add(zone(40, 545, 1480, 150, "能力层", fill=ZONE_GREEN))
+    f.add(zone(40, 545, 1480, 150, "能力层", tone="green"))
     caps = [
         (doc, "版式解析", "栏聚类 · 标题树 · 图表公式"),
         (search, "混合检索", "BM25 + 向量 + 重排"),
@@ -305,12 +321,12 @@ def fig_arch() -> None:
         f.add(text(x - 58, 646, sub, size=14.5, fill=FAINT, anchor="start"))
 
     # ---- zone D: storage + models side by side
-    f.add(zone(40, 745, 720, 130, "存储层", fill=ZONE_GREY))
+    f.add(zone(40, 745, 720, 130, "存储层", tone="grey"))
     f.add(database(120, 810, 1.2))
     f.add(text(160, 800, "SQLite：papers · sections · chunks", size=16, fill=SOFT, anchor="start"))
     f.add(text(160, 824, "向量索引 .npy，memmap 按需加载", size=14.5, fill=FAINT, anchor="start"))
 
-    f.add(zone(800, 745, 720, 130, "模型层", fill=ZONE_PURPLE))
+    f.add(zone(800, 745, 720, 130, "模型层", tone="purple"))
     f.add(chip(880, 810, 1.15, label=""))
     f.add(text(915, 796, "vLLM → Qwen3.8-27B", size=16, fill=SOFT, anchor="start"))
     f.add(text(915, 820, "bge-m3 稠密 · bge-reranker 精排", size=14.5, fill=FAINT, anchor="start"))
@@ -333,7 +349,7 @@ def fig_agent() -> None:
     f = Figure(1560, 500, "fig-agent")
 
     # stage A
-    f.add(zone(40, 70, 800, 400, "阶段 A · 取证", fill=ZONE_ORANGE))
+    f.add(zone(40, 70, 800, 400, "阶段 A · 取证", tone="amber"))
 
     f.add(rect(86, 150, 150, 76, fill=WHITE, stroke=LINE, sw=1.2, r=12))
     f.add(users(161, 186, 0.8))
@@ -364,7 +380,7 @@ def fig_agent() -> None:
     f.add(text(640, 443, "证据列表：页码 · 字符区间 · 得分", size=13, fill=ACCENT))
 
     # stage B
-    f.add(zone(880, 70, 640, 400, "阶段 B · 带证据生成", fill=ZONE_BLUE))
+    f.add(zone(880, 70, 640, 400, "阶段 B · 带证据生成", tone="blue"))
 
     f.add(arrow(782, 442, 906, 292))
 
@@ -391,7 +407,7 @@ def fig_agent() -> None:
 # ----------------------------------------------------------------------- fig 3
 def fig_seq() -> None:
     """Sequence of one cross-paper question."""
-    f = Figure(1420, 820, "fig-seq")
+    f = Figure(1420, 800, "fig-seq")
 
     lanes = [
         ("用户", 120),
