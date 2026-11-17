@@ -219,7 +219,11 @@ def _heading_blocks(sections: list[dict[str, Any]], segments: _Segments,
         text = _normalise(block.text)
         if bare == "abstract":
             seen_abstract = True
-        if title_key and bare == title_key:
+        # The running head carries the paper's own title.  A *numbered* section
+        # may legitimately repeat the title (``3 Layer normalization`` in the
+        # paper "Layer Normalization"), so only the unnumbered rows are
+        # dropped here; a numbered running head is caught by the repeat rule.
+        if title_key and bare == title_key and not _SECTION_NUMBER.match(text):
             continue
         if len(pages_by_title[bare]) >= 3:
             continue
@@ -250,10 +254,25 @@ def _paragraph_blocks(blocks: list[dict[str, Any]], segments: _Segments,
     out: list[Block] = []
     for block in blocks:
         block_type = str(block.get("type") or block.get("block_type") or "").lower()
-        if block_type not in _PARAGRAPH_TYPES:
-            continue
         text = _normalise(block.get("content") or "")
         if not text:
+            continue
+        # A paper set entirely in a math font can have its running prose
+        # classified as a formula (ZeRO: 158 formula blocks, 18 body blocks).
+        # Prose is recovered here; a page number is not.
+        if block_type == "formula":
+            if _looks_like_prose(text):
+                block_type = "body"
+            else:
+                continue
+        if block_type not in _PARAGRAPH_TYPES:
+            continue
+        if len(text) <= 4 and text.isdigit():
+            continue  # a folio
+        # A word or two on its own is what the parser makes of the labels
+        # printed inside a figure ("governments", "American"); it is not a
+        # paragraph, and printing it between two paragraphs is noise.
+        if _is_fragment(text):
             continue
         # A caption is rendered from the table or figure it belongs to; the
         # caption also exists as a content block, and keeping both would print
@@ -410,21 +429,29 @@ def _sort_by_layout(blocks: list[Block]) -> list[Block]:
         middle = (left_edge + right_edge) / 2
 
         spanning = [b for b in items
-                    if len(b.bbox) >= 4 and (b.bbox[2] - b.bbox[0]) > width * 0.55]
+                    if len(b.bbox) >= 4
+                    and (b.bbox[2] - b.bbox[0]) > width * 0.55
+                    # A wide *heading* is just a long title.  Only an object
+                    # can span the columns and split the page into bands; a
+                    # text block has to cover almost the whole width to.
+                    and (b.kind in ("figure", "table", "formula")
+                         or (b.bbox[2] - b.bbox[0]) > width * 0.8)]
         spanning.sort(key=lambda b: (b.bbox[1], b.bbox[0]))
         band_of: dict[int, int] = {id(b): index for index, b in enumerate(spanning)}
 
-        def key(block: Block) -> tuple[int, int, float, float]:
+        def key(block: Block) -> tuple[int, int, int, float, float]:
             if len(block.bbox) < 4:
-                return (10 ** 6, 0, 0.0, 0.0)
+                return (10 ** 6, 0, 0, 0.0, 0.0)
             y = block.bbox[1]
             band = band_of.get(id(block))
             if band is not None:
-                return (band, 0, y, block.bbox[0])
+                # A spanning object closes the band above it, so it sorts after
+                # the blocks that start above its own top edge.
+                return (band, 1, 0, y, block.bbox[0])
             # everything below a spanning block belongs to the next band
             band = sum(1 for b in spanning if b.bbox[3] <= y)
             column = 0 if (block.bbox[0] + block.bbox[2]) / 2 < middle else 1
-            return (band, column + 1, y, block.bbox[0])
+            return (band, 0, column, y, block.bbox[0])
 
         ordered.extend(sorted(items, key=key))
 
@@ -479,11 +506,42 @@ def _centre_inside(inner: list[float], outer: list[float], pad: float = 2.0) -> 
             and outer[1] - pad <= cy <= outer[3] + pad)
 
 
-#: A caption starts with the object it belongs to: ``Figure 3``, ``Table 2``.
-_CAPTION_START = re.compile(r"^(?:figure|table)\s*\d+", re.IGNORECASE)
+#: A block classified as a formula that is really a sentence.
+def _looks_like_prose(text: str) -> bool:
+    """True for a "formula" block that is an ordinary paragraph.
+
+    The discriminator is length: an equation is a handful of tokens, a
+    paragraph is a dozen words or more.  Symbols are not a reliable signal,
+    because a paper set in a math font has ordinary words in it too.
+    """
+    words = text.split()
+    return len(words) >= 12 and sum(1 for w in words if w.isalpha()) >= 6
+
+
+#: A label printed inside a figure, picked up as a paragraph of its own.
+def _is_fragment(text: str) -> bool:
+    """True for a standalone word or two, which is never a paragraph.
+
+    A real short paragraph is a list item ("• 16 layers"), a sentence
+    ("Limitations."), or a table cell kept as text; those are kept.  Punctuation
+    on its own — the parser emits "." and "-" from the rules inside a figure —
+    is always a fragment.
+    """
+    if not any(ch.isalnum() for ch in text):
+        return True
+    if text[:1] in "•-–—*" or text.endswith((".", ":", "?", "!")):
+        return False
+    return len(text.split()) <= 3 and len(text) <= 40
+
+
+#: A caption starts with the object it belongs to: ``Figure 3:``, ``Table E.1:``.
+_CAPTION_START = re.compile(
+    r"^(?:figure|table)\s+[A-Z]?\.?\d+(?:\.\d+)*\s*[:.]", re.IGNORECASE)
 
 #: How far a caption may sit from its object and still belong to it, in points.
-_CAPTION_REACH = 120.0
+#: A figure at the top of a column can have its caption at the bottom of the
+#: same column, so the reach is a whole column's height, not a line or two.
+_CAPTION_REACH = 420.0
 
 
 def _fill_missing_captions(blocks: list[Block], raw: list[dict[str, Any]],
@@ -491,33 +549,60 @@ def _fill_missing_captions(blocks: list[Block], raw: list[dict[str, Any]],
     """Attach a caption to the figures and tables the parse left without one.
 
     The caption is a content block of its own, and pairing it with its object
-    is a separate step upstream that does not always succeed.  Here the caption
-    block is looked up by page and by distance: the closest "Figure n" or
-    "Table n" paragraph above or below the object.  Returns the texts that were
-    consumed, so they are not printed a second time as paragraphs.
+    is a separate step upstream that does not always succeed.  Three cases are
+    handled here, all of them layout facts rather than guesses:
+
+    * the caption sits an inch away from the object, not next to it;
+    * a figure is made of several panels, and the parse recorded one row per
+      panel with the caption attached to only one of them — the panels then
+      share the caption of the group;
+    * the caption is the last line of the previous page.
+
+    Returns the texts that were consumed, so they are not printed a second time
+    as paragraphs.
     """
-    captions = [b for b in raw if str(b.get("type") or "").lower() == "caption"]
+    captions = [b for b in raw
+                if str(b.get("type") or "").lower() == "caption"
+                or (str(b.get("type") or "").lower() == "body"
+                    and _CAPTION_START.match(_normalise(b.get("content") or "")))]
+    by_page: dict[int, list[tuple[float, str, dict[str, Any]]]] = {}
+    for caption in captions:
+        text = _normalise(caption.get("content") or "")
+        if not _CAPTION_START.match(text):
+            continue
+        box = _bbox(caption.get("bbox"))
+        if len(box) < 4:
+            continue
+        by_page.setdefault(_page(caption), []).append((box[1], text, caption))
+
     used: set[str] = set()
     for block in blocks:
         if block.kind not in ("figure", "table") or block.caption.strip():
             continue
         if len(block.bbox) < 4:
             continue
+        kind = "table" if block.kind == "table" else "figure"
+        # A caption is looked for on the object's own page first, then on the
+        # page that holds its top or bottom edge.
+        pages = [block.page_no]
+        if block.bbox[1] < 300:
+            pages.append(block.page_no - 1)
+        if block.bbox[3] > 500:
+            pages.append(block.page_no + 1)
+
         best: tuple[str, dict[str, Any]] | None = None
         best_gap = _CAPTION_REACH
-        for caption in captions:
-            if _page(caption) != block.page_no:
-                continue
-            text = _normalise(caption.get("content") or "")
-            if not _CAPTION_START.match(text):
-                continue
-            box = _bbox(caption.get("bbox"))
-            if len(box) < 4:
-                continue
-            # a table caption sits above its table, a figure caption below
-            gap = min(abs(box[1] - block.bbox[3]), abs(block.bbox[1] - box[3]))
-            if gap < best_gap:
-                best, best_gap = (text, caption), gap
+        for page in pages:
+            for y0, text, caption in by_page.get(page, []):
+                if kind == "table" and not text.lower().startswith("table"):
+                    continue
+                if kind == "figure" and not text.lower().startswith("figure"):
+                    continue
+                gap = min(abs(y0 - block.bbox[3]), abs(block.bbox[1] - y0))
+                if page != block.page_no:
+                    gap += 80.0  # a caption on another page is a fallback
+                if gap < best_gap:
+                    best, best_gap = (text, caption), gap
         if best is not None:
             text, _ = best
             block.caption = text
@@ -526,21 +611,50 @@ def _fill_missing_captions(blocks: list[Block], raw: list[dict[str, Any]],
     return used
 
 
+def _drop_front_matter(blocks: list[Block], title: str, authors: list[str]) -> list[Block]:
+    """Remove the title and the author block from the body of the paper.
+
+    The masthead already prints both, and the parser also emits them as body
+    paragraphs: the title once, then one line per author with the affiliation
+    and the e-mail address attached.
+    """
+    title_key = _normalise(title).lower()
+    names = [name.strip().lower() for name in authors if name.strip()]
+    kept: list[Block] = []
+    for block in blocks:
+        if block.kind != "paragraph":
+            kept.append(block)
+            continue
+        text = _normalise(block.text)
+        lowered = text.lower()
+        if title_key and lowered == title_key:
+            continue
+        if "@" in text and len(text) < 200:
+            continue  # an author line carries the e-mail address
+        if names and len(text) < 200 and any(lowered.startswith(n) for n in names):
+            continue
+        kept.append(block)
+    return kept
+
+
 def _drop_page_images(blocks: list[Block]) -> list[Block]:
-    """Remove the "figures" that are really whole pages.
+    """Remove the "figures" and "formulas" that are really whole pages.
 
     A scanned paper is parsed page by page, and the rasteriser records each
     page as a figure: the box starts at the origin and covers the whole sheet,
-    and there is no caption because the page is not a figure.  Shown as
-    figures they would print every page twice.
+    and there is no caption because the page is not a figure.  A page of
+    running text set in a math font can also be recorded as one enormous
+    formula.  Shown as objects they would print the page twice.
     """
     kept: list[Block] = []
     for block in blocks:
-        if (block.kind == "figure" and not block.caption.strip()
-                and len(block.bbox) >= 4
-                and block.bbox[0] <= 2 and block.bbox[1] <= 2
-                and (block.bbox[2] - block.bbox[0]) >= 480
-                and (block.bbox[3] - block.bbox[1]) >= 660):
+        page_sized = (len(block.bbox) >= 4
+                      and (block.bbox[2] - block.bbox[0]) >= 480
+                      and (block.bbox[3] - block.bbox[1]) >= 600)
+        if page_sized and block.kind == "formula":
+            continue
+        if (page_sized and block.kind == "figure" and not block.caption.strip()
+                and block.bbox[0] <= 2 and block.bbox[1] <= 2):
             continue
         kept.append(block)
     return kept
@@ -650,11 +764,13 @@ async def build_document(paper_id: str, lang: str = "zh") -> Document | None:
     if borrowed:
         blocks = [b for b in blocks
                   if not (b.kind == "paragraph" and _normalise(b.text).lower() in borrowed)]
+
+    title = _normalise(paper.get("title") or "") or _normalise(structure.get("title") or "")
     blocks = _drop_page_images(blocks)
+    blocks = _drop_front_matter(blocks, title, _author_names(paper.get("authors")))
     blocks = _drop_shadowed(blocks)
     blocks = _sort_by_layout(blocks)
 
-    title = _normalise(paper.get("title") or "") or _normalise(structure.get("title") or "")
     abstract = _normalise(paper.get("abstract") or "")
     document = Document(
         paper_id=paper_id,

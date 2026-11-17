@@ -293,6 +293,17 @@ _HEADING = re.compile(r"^\s*(#{1,4})\s+(.*)$")
 _TRANSLATABLE = {"body", "text", "caption", ""}
 
 
+def _looks_like_prose(text: str) -> bool:
+    """True for a "formula" block that is an ordinary paragraph.
+
+    Kept in step with ``app.render.document._looks_like_prose``: the reader and
+    the translator must agree on which blocks are prose, or the reading view
+    shows an untranslated paragraph.
+    """
+    words = str(text or "").split()
+    return len(words) >= 12 and sum(1 for w in words if w.isalpha()) >= 6
+
+
 async def build_document_segments(
     sections: list[dict[str, Any]],
     blocks: list[dict[str, Any]],
@@ -319,6 +330,12 @@ async def build_document_segments(
     # Body paragraphs, split into sentences.
     for order, block in enumerate(blocks):
         block_type = (block.get("type") or block.get("block_type") or "").lower()
+        if block_type == "formula" and _looks_like_prose(block.get("content") or ""):
+            # A paper set in a math font comes out of the parser with its
+            # running prose labelled as a formula (ZeRO, PPO).  The reader
+            # recovers those blocks, so they have to be translated as well or
+            # the bilingual view shows English there.
+            block_type = "body"
         if block_type and block_type not in _TRANSLATABLE:
             continue
         text = (block.get("content") or "").strip()

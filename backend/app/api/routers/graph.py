@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -11,6 +12,10 @@ from app.graph import builder as graph_builder
 from app.graph import contradiction as contradiction_mod
 from app.graph import future_work as future_work_mod
 from app.services import agent as agent_service
+
+#: The last future-work answer per set of papers.  The extraction is a single
+#: slow model call; the answer only depends on the papers, so it is reused.
+_FUTURE_WORK_CACHE: dict[str, dict[str, Any]] = {}
 
 router = APIRouter(prefix="/graph", tags=["graph"])
 
@@ -105,12 +110,27 @@ async def contradictions(req: GraphRequest) -> dict:
 
 @router.post("/future-work")
 async def future_work(req: GraphRequest) -> dict:
-    """Mine unexplored research directions from the future-work sections."""
+    """Mine unexplored research directions from the future-work sections.
+
+    The extraction is one large model call and takes a couple of minutes, which
+    is far too long for a button.  The answer only depends on the set of papers,
+    so it is cached per set: the first click fills the cache, every later one is
+    immediate, and uploading a paper changes the key.
+    """
     chunks = await agent_service.load_chunks(req.paper_ids or None)
     if not chunks:
         return {"statements": [], "opportunities": [], "note": "文献库为空"}
     papers = {p["paper_id"]: p for p in await agent_service.load_papers(req.paper_ids or None)}
-    return await future_work_mod.mine_future_work(chunks, papers)
+
+    key = hashlib.sha1(  # noqa: S324 - a cache key, not a signature
+        "|".join(sorted(papers)).encode("utf-8")).hexdigest()[:16]
+    cached = _FUTURE_WORK_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    result = await future_work_mod.mine_future_work(chunks, papers)
+    _FUTURE_WORK_CACHE[key] = result
+    return result
 
 
 @router.post("/review")
