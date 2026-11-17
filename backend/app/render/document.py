@@ -439,6 +439,18 @@ def _drop_shadowed(blocks: list[Block]) -> list[Block]:
         (_normalise(b.text).lower(), b.page_no): b for b in blocks if b.kind == "heading"
     }
 
+    def inside_object(block: Block) -> bool:
+        """True when this text sits inside a table or a figure *of its page*.
+
+        The page has to be compared: a figure at the top of page 5 and a
+        paragraph at the top of page 4 share the same coordinates, and
+        ignoring that used to delete a third of the paper.
+        """
+        return any(
+            item.page_no == block.page_no and _centre_inside(block.bbox, item.bbox)
+            for item in media
+        )
+
     kept: list[Block] = []
     for block in blocks:
         if block.kind in ("table", "figure", "heading"):
@@ -455,11 +467,12 @@ def _drop_shadowed(blocks: list[Block]) -> list[Block]:
                 heading.bbox = block.bbox
             continue
         if block.kind == "formula":
-            if any(_centre_inside(block.bbox, figure.bbox) for figure in figures):
+            if any(item.page_no == block.page_no
+                   and _centre_inside(block.bbox, item.bbox) for item in figures):
                 continue
             kept.append(block)
             continue
-        if any(_centre_inside(block.bbox, item.bbox) for item in media):
+        if inside_object(block):
             continue
         kept.append(block)
     return kept
