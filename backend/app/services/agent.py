@@ -235,9 +235,16 @@ def _make_generate_framework():
                 '"year": 2020, "venue": "string"}]}'
             ),
             purpose="framework",
+            # A reasoning model spends thousands of tokens thinking before it
+            # writes; with the old budget the JSON was cut off mid-object and
+            # arrived as an unparseable fragment.
+            thinking=False,
+            max_tokens=6000,
         )
         if not payload:
-            return {"error": "模型未返回合法 JSON", "raw": raw[:500]}
+            hint = ("模型输出被截断，JSON 不完整" if len(raw) > 2000
+                    else "模型未返回合法 JSON")
+            return {"error": hint, "raw": raw[:500]}
 
         # Guardrail: drop references that do not exist in the library.
         from app.llm.guardrails import validate_references
@@ -261,9 +268,14 @@ def _make_generate_diagram():
             schema_hint='{"diagram_type": "string", "title": "string", "code": "string", '
                         '"description": "string"}',
             purpose="diagram",
+            # the code field can be long, and reasoning would eat the budget
+            thinking=False,
+            max_tokens=4000,
         )
         if not payload:
-            return {"error": "模型未返回合法 JSON", "raw": raw[:500]}
+            hint = ("模型输出被截断，JSON 不完整" if len(raw) > 1200
+                    else "模型未返回合法 JSON")
+            return {"error": hint, "raw": raw[:500]}
         return payload
 
     return generate_diagram
