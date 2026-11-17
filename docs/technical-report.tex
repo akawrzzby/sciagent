@@ -1,7 +1,8 @@
 \documentclass[UTF8,fontset=windows,zihao=5,a4paper]{ctexart}
 
+% ---- 版心：中文期刊惯例，四周留白较宽
 \usepackage{geometry}
-\geometry{top=1.9cm,bottom=1.8cm,left=1.8cm,right=1.8cm}
+\geometry{top=2.2cm,bottom=2.0cm,left=2.1cm,right=2.1cm,headsep=0.6cm,footskip=0.9cm}
 \usepackage{xcolor}
 \usepackage{graphicx}
 \usepackage{booktabs}
@@ -9,47 +10,61 @@
 \usepackage{array}
 \usepackage{ragged2e}
 \usepackage{fancyhdr}
-\usepackage{titlesec}
 \usepackage{enumitem}
 \usepackage{caption}
 \usepackage{fancyvrb}
 \usepackage{fvextra}
 \usepackage[hidelinks]{hyperref}
 
-\definecolor{ink}{HTML}{1D2836}
-\definecolor{accent}{HTML}{B74C06}
-\definecolor{rule}{HTML}{CFD9E4}
+\definecolor{ink}{HTML}{000000}
+\definecolor{accent}{HTML}{8C2F00}
+\definecolor{rule}{HTML}{9AA5B1}
 
+% ---- 标题层级：黑体，编号与文字之间留一字空
 \ctexset{
-  section/format = \Large\bfseries\color{ink},
-  subsection/format = \large\bfseries\color{ink},
-  subsubsection/format = \normalsize\bfseries\color{ink},
+  section = {
+    format = \zihao{4}\heiti\raggedright,
+    beforeskip = 14pt plus 2pt minus 2pt,
+    afterskip = 8pt plus 1pt minus 1pt,
+  },
+  subsection = {
+    format = \zihao{5}\heiti\raggedright,
+    beforeskip = 10pt plus 1pt minus 1pt,
+    afterskip = 5pt plus 1pt,
+  },
+  subsubsection = {
+    format = \zihao{5}\heiti\raggedright,
+    beforeskip = 8pt plus 1pt,
+    afterskip = 4pt,
+  },
 }
 
-\setlist[itemize]{leftmargin=1.4em,itemsep=2pt,topsep=3pt,parsep=0pt}
-\setlist[enumerate]{leftmargin=1.6em,itemsep=2pt,topsep=3pt,parsep=0pt}
+% ---- 正文：宋体五号，首行缩进两字，段间不空行
+\setlength{\parindent}{2em}
+\setlength{\parskip}{0pt}
+\linespread{1.12}
+\AtBeginDocument{\fontsize{9}{11.2}\selectfont}
+\renewcommand{\arraystretch}{1.14}
 
-\captionsetup{font=small,labelfont=bf,labelsep=quad,skip=4pt}
-\setlength{\parskip}{2.5pt}
-\linespread{1.02}
-\setlength{\parindent}{0pt}
-\renewcommand{\arraystretch}{1.06}
-\usepackage{etoolbox}
-\AtBeginEnvironment{longtable}{\scriptsize}
-\AtBeginDocument{\fontsize{9}{11.4}\selectfont}
+\setlist[itemize]{leftmargin=2.2em,itemsep=1pt,topsep=3pt,parsep=0pt}
+\setlist[enumerate]{leftmargin=2.4em,itemsep=1pt,topsep=3pt,parsep=0pt}
 
+% ---- 图表题注：中文期刊习惯，"图 1　题名"，居中，黑体小五
+\DeclareCaptionFont{heifont}{\zihao{6}\heiti}
+\captionsetup{font=heifont,labelsep=quad,justification=centering,skip=5pt}
+\captionsetup[table]{position=top,skip=5pt}
+
+% ---- 页眉页脚
 \pagestyle{fancy}
 \fancyhf{}
-\renewcommand{\headrulewidth}{0pt}
-\fancyfoot[C]{\small\color{rule}\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{rule}\leaders\hrule height \headrulewidth\hfill}}
+\fancyhead[C]{\zihao{6}\songti SciAgent：意图驱动的全流程科研助手}
+\fancyfoot[C]{\zihao{6}\thepage}
 
-\usepackage{tcolorbox}
-\tcbuselibrary{skins,breakable}
-\newtcolorbox{aside}{
-  breakable, enhanced, colback=orange!4!white, colframe=orange!45!black,
-  boxrule=0pt, leftrule=2pt, arc=1pt, left=6pt, right=6pt, top=4pt, bottom=4pt,
-  fontupper=\small
-}
+% ---- 引文块：期刊通常用楷体缩进，不用彩色框
+\newenvironment{aside}{\par\vspace{2pt}\begingroup\zihao{5}\kaishu
+  \leftskip=2em\rightskip=2em\noindent\ignorespaces}{\par\endgroup\vspace{2pt}}
 
 \begin{document}
 \thispagestyle{empty}
@@ -74,78 +89,54 @@
 \clearpage
 \subsection*{摘要}
 \addcontentsline{toc}{subsection}{摘要}
-SciAgent 是一个面向科研文献阅读与写作的端到端 Agent 系统。它把"检索、精读、对比、综述、写作"串成一条可溯源的流水线，而非一个通用聊天界面。
+本文报告 SciAgent 的设计与实现。SciAgent 面向科研文献的阅读与写作，将检索、精读、对比、综述与写作组织为一条可溯源的流水线。
 
-系统由三部分组成：
+系统由三个子系统构成。多模态解析引擎采用版式感知的解析策略，还原双栏阅读顺序、章节树、表格、图、公式与结构化参考文献；对无文本层的扫描件，改由多模态模型逐页转写。Agent 编排采用取证与生成分离的两阶段结构：第一阶段产出携带字符区间的证据集合，第二阶段仅依据该集合生成正文，两阶段之间以证据为唯一接口。图论挖掘在引用图上计算 PageRank、介数中心性、k-core 与 HITS，据此区分基石文献与衍生文献，并生成领域综述与研究机会。
 
-\begin{enumerate}
-\item 多模态解析引擎：版式感知的 PDF 解析器还原双栏顺序、章节树、表格、图、公式与结构化参考文献；无文本层的扫描件回退到多模态大模型逐页转写。
-\item 两阶段 Agent 编排：Router（意图路由）→ Planner（任务 DAG）→ Executor（原生 Function Calling 工具循环）→ Reflection（护栏与引用校验）。两个阶段以证据为界：工具调用产出的证据带字符区间，生成阶段只能引用这些证据。
-\item 图论驱动的知识挖掘：在引用图上计算 PageRank、Betweenness、k-core、HITS，据此区分基石文献与衍生文献，并生成领域综述与 Future Work 研究机会。
-\end{enumerate}
+在赛题提供的 39 篇测试集上，系统对 \texttt{1706.03762v1.pdf} 的版式解析耗时 4.2 秒，含公式转写的端到端耗时为 71.7 秒；8 位作者、26 个章节节点与 71 条结构化参考文献均正确还原。稠密检索通道对语义相近文本的余弦相似度为 0.89，对语义无关文本为 0.38；重排通道对切题段落给出 +0.92，对离题段落给出 +0.00。
 
-在赛题提供的 39 篇测试数据集上，系统对 \texttt{1706.03762v1.pdf} 的版式解析耗时 \textbf{4.2 秒}（端到端 71.7 秒，含 27 条公式的多模态转写），8 位作者、26 个章节节点的标题树、71 条结构化参考文献全部正确；稠密检索通道在语义相近文本上余弦相似度 0.89、语义无关文本 0.38；重排通道对切题段落给出 +0.92、对离题段落给出 +0.00。
-
-本文档按赛题要求依次说明项目概述、需求分析、系统架构设计、AI 技术方案（含选型理由、集成方式与优化策略）、核心功能实现、测试与部署、总结与展望，并单列技术创新点与应用创新点。
+全文组织如下：第 1 节说明问题背景与系统定位，第 2 节给出功能与非功能需求，第 3 节描述架构设计，第 4 节论述 AI 技术的选型理由、集成方式与优化策略，第 5 节说明各模块的实现，第 6 节报告测试与部署结果，第 7 节总结全文，第 8 节单列技术创新点与应用创新点。
 
 \subsection*{1. 项目概述}
 \addcontentsline{toc}{subsection}{1. 项目概述}
-\subsubsection*{1.1 背景与痛点}
-大模型已经能读论文了。但科研工作者抱怨的不是"读不懂"，而是读得慢、信不过、攒不起来。拆开看有五处：
+\subsubsection*{1.1 问题背景}
+科研文献的机器化利用受制于五类问题。
 
-\begin{enumerate}
-\item PDF 不是文本。学术 PDF 有双栏、跨栏图表、LaTeX 公式和脚注。直接复制粘贴得到的是错序文本，扫描件更是一个字都取不出来。这一步做不好，后面的结构化、检索、问答都无从谈起。
-\end{enumerate}
+其一，PDF 并非结构化文本。学术 PDF 普遍采用双栏排版，并含跨栏图表、数学公式与脚注；直接提取所得到的字符序列在阅读顺序上已经错乱，纯图像扫描件更不含任何文本层。若解析阶段不能恢复版面结构，后续的分块、检索与问答均失去可靠基础。
 
-\begin{enumerate}
-\item 答案不敢信。通用大模型谈论文细节时会编造：不存在的参考文献写得像模像样，作者张冠李戴，甚至把一篇论文的结论安到另一篇头上。科研场景对这类错误的容忍度很低。
-\end{enumerate}
+其二，生成内容的可信度不足。通用语言模型在陈述论文细节时存在虚构现象，包括杜撰参考文献、混淆作者归属，以及将一篇论文的结论归入另一篇名下。OpenScholar 的统计给出了量级：在带引用生成任务中，GPT-4o 的引用幻觉率为 78\% 至 90\%，即十条引用中至少有八条无法核实。该现象并非孤例：PubMed Central 上被判定为伪造的引用比例由 2023 年的 1/2828 上升至 2025 年的 1/458，2026 年前七周进一步升至 1/277；GPTZero 在 NeurIPS 2025 录用的 51 篇论文中检出 100 条幻觉引用；另一项统计显示，仅约 26.5\% 的 AI 生成引用完全正确。检索所解决的是材料获取问题，引用可溯源与矛盾可发现属于另外两项能力，本文将其分别实现。
 
-这一条不是主观感受，而是有实测数据支撑的。OpenScholar（arXiv:2411.14199，发表于 \emph{Nature} 650:857–863）专门统计了 GPT-4o 在带引用生成中的引用幻觉率，结果是 \textbf{78\%–90\%}——也就是说模型写出的引用里，十条有八条以上经不起核对。该工作同时报告，自反馈推理循环能把 OS-8B 的准确率推到超过 GPT-4o 6.1 个百分点，把 OS-GPT-4o 相对 GPT-4o 提升 12\%。
+其三，阅读工具彼此割裂。PDF 阅读器忠实于版式却不理解语义，翻译工具能翻译却丢失指代关系，文献管理软件能收藏却不支持提问。一篇三十页的论文往往需要在四个工具之间往复切换方能读通。
 
-幻觉引用并非个例，它在逐年上升：PubMed Central 上被判定为编造的引用比例从 2023 年的 1/2828 升到 2025 年的 1/458，2026 年前七周进一步升到 1/277。GPTZero 在 NeurIPS 2025 录用的 51 篇论文中发现 100 条幻觉引用。另一项针对 AI 生成引用的统计显示，只有约 \textbf{26.5\%} 的引用完全正确。
+其四，方向判断缺乏依据。阅读二十篇论文可以复述各自的结论，却难以回答该方向尚存哪些空白、哪些问题被反复提出而未获解决。
 
-检索解决的是"找到材料"，引用可溯源与矛盾可发现是另外两件事。本项目把它们分开实现，而不是当作检索的副产品。
-
-\begin{enumerate}
-\item 阅读体验割裂。PDF 阅读器忠实于版式却不理解语义，翻译工具能翻译却丢失指代关系，文献管理软件能收藏却不支持提问。一份 30 页的论文，要在四个工具之间来回切换才能读懂。
-\end{enumerate}
-
-\begin{enumerate}
-\item 不知道下一步做什么。读完 20 篇论文能复述每篇结论，却说不清这个方向还有哪些空白、哪些问题被反复提及却从未解决。
-\end{enumerate}
-
-\begin{enumerate}
-\item 写作从零开始。论文框架、系统架构图、数据表格都要从空白文档画起。最危险的是参考文献：凭记忆写出来的引用有一半查无此文。
-\end{enumerate}
+其五，写作环节缺少支撑。论文框架、系统架构图与数据表格均需从空白文档起笔；其中的参考文献尤易出错，凭记忆写出的条目常有一半查无此文。
 
 \subsubsection*{1.2 系统定位与目标}
-SciAgent 的定位是：一个可信的、可溯源的、会主动使用工具的科研流水线。
-
-三条不可让渡的设计底线：
+SciAgent 定位为面向科研文献的可溯源处理流水线，其设计遵循三项原则。
 
 \begin{longtable}{@{}p{0.22\textwidth}p{0.74\textwidth}@{}}
 \toprule
-\textbf{底线} & \textbf{具体含义} \\
+\textbf{原则} & \textbf{含义} \\
 \midrule
 \endfirsthead
 \toprule
-\textbf{底线} & \textbf{具体含义} \\
+\textbf{原则} & \textbf{含义} \\
 \midrule
 \endhead
 \bottomrule
 \endfoot
-\textbf{证据优先} & 任何一句结论都必须能指回原文的字符区间。指不回去，就不说。 \\
-\textbf{结构优先} & 标题、表格、公式、参考文献各自建模，而不是拍平成一坨字符串。 \\
-\textbf{可降级} & 稠密通道故障自动退化为 BM25；大模型超时给出明确错误而不是白屏。 \\
+证据优先 & 每一项结论均须指回原文的字符区间；无法指回者不予陈述。 \\
+结构优先 & 标题、表格、公式与参考文献分别建模，不做无结构的文本拼接。 \\
+可降级 & 稠密检索通道失效时退化为 BM25；语言模型超时则返回明确错误，不做静默失败。 \\
 \end{longtable}
 
-对应的三个可度量目标：
+上述原则对应三项可度量的目标。
 
 \begin{itemize}
-\item 解析准确：对测试集标准论文，标题树层级、作者、表格、参考文献字段全部正确；对扫描件，能产出可检索的正文。
-\item 回答可信：所有回答携带可点击的溯源锚点（文献 / 页码 / 字符区间）；无据时明确拒答而非编造。
-\item 闭环完整：从上传论文到生成综述、框架、图表，全流程不跳出系统。
+\item 解析准确：对测试集内的标准论文，标题层级、作者、表格与参考文献字段全部正确；对扫描件，能够产出可检索的正文。
+\item 回答可信：全部回答携带可点击的溯源锚点，包含文献标识、页码与字符区间；证据不足时明确拒答。
+\item 闭环完整：从文献入库到综述、框架与图表生成，全流程在系统内完成。
 \end{itemize}
 
 \subsubsection*{1.3 赛题要求映射}
@@ -169,7 +160,7 @@ SciAgent 的定位是：一个可信的、可溯源的、会主动使用工具�
 \end{longtable}
 
 \subsubsection*{1.4 对照评分标准的自评}
-赛题说明书的评分标准是五个维度：\textbf{AI 技术深度 35\%、创新性 15\%、产品功能和工程质量 30\%、用户体验 10\%、实用性 10\%}。官方没有给出细分到考察点的权重，因此下表是我们自己的拆解：把五个维度拆成 18 个可核验的考察点，每行给出实现位置、可核验的证据与自评。括号里的百分比是我们为内部排序给出的估计，不是官方权重。
+赛题说明书的评分标准包含五个维度：AI 技术深度 35\%、创新性 15\%、产品功能和工程质量 30\%、用户体验 10\%、实用性 10\%。官方未给出细分到考察点的权重，下表为本文的拆解，将五个维度展开为 18 个可核验的考察点，逐项列出实现位置、可核验证据与自评结论。表中百分比为内部排序所用的估计值。
 
 \begin{longtable}{@{}p{0.10\textwidth}p{0.34\textwidth}p{0.30\textwidth}p{0.18\textwidth}@{}}
 \toprule
@@ -201,8 +192,6 @@ SciAgent 的定位是：一个可信的、可溯源的、会主动使用工具�
 \textbf{学术赋能价值（AI4S，5\%）} & 整条流水线 & 见 §5 / §7 & 中上 \\
 \textbf{开源潜力与推广前景（5\%）} & 仓库结构、\texttt{.env.example}、Docker、复跑脚本 & \texttt{scripts/eval\_rag.py} 等评测脚本可现场复跑全部数字 & 强 \\
 \end{longtable}
-
-\begin{aside}表中标注为"中"或"中上"的四处，原因分别是：外部 API 在部分网络环境不可达；库内真实互引只有 14 条，限制了图谱算法的发挥空间；中英对照的边缘 case 覆盖不足；AI4S 的价值论证目前只有本项目自身的证据。评审若追问这四点，答案就在这里。 §6.3.4 还显示一处能力边界：单篇问题三轮全满分，跨论文对比问题只有 0.26–0.82 且波动更大。原因是模型在拼对照表时会写出原文里没有对应句子的概括句（§6.3.4 有逐条举例）。这一项不属于任何一档的扣分点，因此单独列出。\end{aside}
 
 \subsection*{2. 需求分析}
 \addcontentsline{toc}{subsection}{2. 需求分析}
@@ -327,8 +316,8 @@ SciAgent 的定位是：一个可信的、可溯源的、会主动使用工具�
 \subsubsection*{3.1 总体架构}
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.97\textwidth]{figures/fig-arch.png}
-\caption*{图 3-1 系统分层架构。六个工作台共用一套编排层与能力层，存储与模型在底层}
+\includegraphics[width=0.92\textwidth]{figures/fig-arch.png}
+\caption{系统分层架构。六个工作台共用一套编排层与能力层，存储与模型在底层}
 \end{figure}
 
 五个层各自只依赖下一层：展现层通过 \texttt{/api} 与 SSE 事件流访问编排层，编排层调用能力层的纯函数，能力层读写存储、再向下使用模型。这样分层的好处是每一层都能单独测——解析器不需要 HTTP 服务，检索器不需要模型在线（稠密通道不可用时退化为 BM25）。
@@ -362,13 +351,13 @@ SciAgent 采用两阶段设计：
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.97\textwidth]{figures/fig-agent.png}
-\caption*{图 3-2 两阶段 Agent 编排。阶段 A 只取证，阶段 B 只依据证据生成}
+\includegraphics[width=0.92\textwidth]{figures/fig-agent.png}
+\caption{两阶段 Agent 编排。阶段 A 只取证，阶段 B 只依据证据生成}
 \end{figure}
 
-阶段 A（取证） 产出结构化的 \texttt{evidence} 列表，每条包含：文献 ID、文献标题、页码、字符区间、原文片段、检索得分、来源通道（sparse / dense / rerank）。这个列表可以在 UI 的"思考过程"面板中逐条审计，用户能清楚看到"答案的依据来自哪几段原文"。
+阶段 A 即取证阶段，产出结构化的 evidence 列表，其中每条记录包含文献标识、文献标题、页码、字符区间、原文片段、检索得分与来源通道。该列表在界面的思考过程面板中逐条可见，用户可据此判断答案依据了哪几段原文。
 
-阶段 B（生成） 的 system prompt 中只包含这些证据，并显式声明"只允许引用 \texttt{[n]} 形式的编号，n 必须在证据列表范围内"。生成完成后，Reflection 阶段再次执行两道校验：
+阶段 B 即生成阶段。其 system prompt 中仅包含上述证据，并显式限定引用编号的取值范围。生成完成后，Reflection 阶段再行两道校验：
 
 \begin{itemize}
 \item 证据绑定（\texttt{guardrails.bind\_citations}）：正则扫描答案中的 \texttt{[n]}，凡不在证据集合内的编号一律删除，并把答案标记为"部分无据"。
@@ -382,8 +371,8 @@ SciAgent 采用两阶段设计：
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.97\textwidth]{figures/fig-seq.png}
-\caption*{图 3-3 一次跨文献问答的时序。SSE 事件逐条回推到前端，最后一条是带引用的答案}
+\includegraphics[width=0.92\textwidth]{figures/fig-seq.png}
+\caption{一次跨文献问答的时序。SSE 事件逐条回推到前端，最后一条是带引用的答案}
 \end{figure}
 
 SSE 事件类型：\texttt{session} / \texttt{route} / \texttt{plan} / \texttt{stage} / \texttt{thinking} / \texttt{tool\_call} / \texttt{tool\_result} / \texttt{delta} / \texttt{guardrail} / \texttt{final} / \texttt{error} / \texttt{abstain}。前端 \texttt{lib/sse.ts} 用统一的 \texttt{AgentEvent} 类型分发，\texttt{Ask.tsx} 按类型更新对应的面板。
@@ -396,12 +385,12 @@ SSE 事件类型：\texttt{session} / \texttt{route} / \texttt{plan} / \texttt{s
 分块 按章节边界切，块内按句子聚合，目标 380 token、重叠 60 token。章节边界保证语义完整，重叠避免答案正好落在切点上。
 
 \subsubsection*{3.6 部署架构}
-实际演示形态（本次比赛使用）—— 单进程同源托管
+实际演示形态为单进程同源托管。
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.97\textwidth]{figures/fig-deploy.png}
-\caption*{图 3-4 单进程同源的部署链路。隧道只暴露一个 HTTPS 入口，接口与静态资源同 origin}
+\includegraphics[width=0.92\textwidth]{figures/fig-deploy.png}
+\caption{单进程同源的部署链路。隧道只暴露一个 HTTPS 入口，接口与静态资源同 origin}
 \end{figure}
 
 部署形态在实施过程中收敛为单进程。初版规划是把前端容器、后端容器与 Nginx 部署在一台独立 Docker 主机上；实施中该主机失联（双向 ping 100\% 丢包、SSH 超时），而承载 LLM 与重计算的 192 核主机没有 Docker 权限，原拓扑无法落地。
@@ -412,7 +401,7 @@ SSE 事件类型：\texttt{session} / \texttt{route} / \texttt{plan} / \texttt{s
 
 \subsection*{4. AI 技术方案}
 \addcontentsline{toc}{subsection}{4. AI 技术方案}
-本节按选型理由（§4.1–§4.2）、集成方式（§4.3–§4.7）与优化策略（§4.8–§4.10）三部分展开。
+本节按选型理由、集成方式与优化策略三部分展开，依次对应 §4.1 至 §4.2、§4.3 至 §4.7、§4.8 至 §4.10。
 
 \subsubsection*{4.1 大模型选型与理由}
 \textbf{选定：Qwen3.8-27B，通过 vLLM 以 OpenAI 兼容协议自托管。}
@@ -438,7 +427,7 @@ SSE 事件类型：\texttt{session} / \texttt{route} / \texttt{plan} / \texttt{s
 6 & \textbf{可替换性} & 客户端只依赖 OpenAI 兼容协议，任何兼容端点（OpenAI / DeepSeek / Qwen API）都能通过 \texttt{LLM\_BASE\_URL} 接入，只要模型具备多模态与 function calling 能力。 \\
 \end{longtable}
 
-关于"为什么不用更大的模型"：27B 规模在自托管成本与能力之间取平衡。更重要的是，系统把"难"的部分（结构化解析、精确检索、图论计算）都下沉到了确定性代码，模型只负责语义理解与自然语言生成——这使得 27B 足以胜任，也使得整个系统的输出更稳定。
+关于模型规模的取舍，27B 在自托管成本与能力之间取得平衡。其可行性来自系统结构：结构化解析、精确检索与图论计算均由确定性代码承担，模型仅负责语义理解与自然语言生成，因而输出更为稳定。
 
 \subsubsection*{4.2 集成方式}
 协议层：统一走 OpenAI 兼容的 \texttt{/v1/chat/completions}。\texttt{app/llm/client.py} 封装了三个能力：
@@ -511,8 +500,8 @@ Prompt 设计的三个原则：
 \subsubsection*{4.5 混合检索：策略与理由}
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.97\textwidth]{figures/fig-retrieval.png}
-\caption*{图 4-1 混合检索链路。两路召回各自打分，只用排名融合，再交给精排}
+\includegraphics[width=0.92\textwidth]{figures/fig-retrieval.png}
+\caption{混合检索链路。两路召回各自打分，只用排名融合，再交给精排}
 \end{figure}
 
 检索采用两路召回，而非单通道：

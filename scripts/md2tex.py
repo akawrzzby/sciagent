@@ -20,8 +20,9 @@ DST = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT / "docs" / "techn
 
 PREAMBLE = r"""\documentclass[UTF8,fontset=windows,zihao=5,a4paper]{ctexart}
 
+% ---- 版心：中文期刊惯例，四周留白较宽
 \usepackage{geometry}
-\geometry{top=1.9cm,bottom=1.8cm,left=1.8cm,right=1.8cm}
+\geometry{top=2.2cm,bottom=2.0cm,left=2.1cm,right=2.1cm,headsep=0.6cm,footskip=0.9cm}
 \usepackage{xcolor}
 \usepackage{graphicx}
 \usepackage{booktabs}
@@ -29,47 +30,61 @@ PREAMBLE = r"""\documentclass[UTF8,fontset=windows,zihao=5,a4paper]{ctexart}
 \usepackage{array}
 \usepackage{ragged2e}
 \usepackage{fancyhdr}
-\usepackage{titlesec}
 \usepackage{enumitem}
 \usepackage{caption}
 \usepackage{fancyvrb}
 \usepackage{fvextra}
 \usepackage[hidelinks]{hyperref}
 
-\definecolor{ink}{HTML}{1D2836}
-\definecolor{accent}{HTML}{B74C06}
-\definecolor{rule}{HTML}{CFD9E4}
+\definecolor{ink}{HTML}{000000}
+\definecolor{accent}{HTML}{8C2F00}
+\definecolor{rule}{HTML}{9AA5B1}
 
+% ---- 标题层级：黑体，编号与文字之间留一字空
 \ctexset{
-  section/format = \Large\bfseries\color{ink},
-  subsection/format = \large\bfseries\color{ink},
-  subsubsection/format = \normalsize\bfseries\color{ink},
+  section = {
+    format = \zihao{4}\heiti\raggedright,
+    beforeskip = 14pt plus 2pt minus 2pt,
+    afterskip = 8pt plus 1pt minus 1pt,
+  },
+  subsection = {
+    format = \zihao{5}\heiti\raggedright,
+    beforeskip = 10pt plus 1pt minus 1pt,
+    afterskip = 5pt plus 1pt,
+  },
+  subsubsection = {
+    format = \zihao{5}\heiti\raggedright,
+    beforeskip = 8pt plus 1pt,
+    afterskip = 4pt,
+  },
 }
 
-\setlist[itemize]{leftmargin=1.4em,itemsep=2pt,topsep=3pt,parsep=0pt}
-\setlist[enumerate]{leftmargin=1.6em,itemsep=2pt,topsep=3pt,parsep=0pt}
+% ---- 正文：宋体五号，首行缩进两字，段间不空行
+\setlength{\parindent}{2em}
+\setlength{\parskip}{0pt}
+\linespread{1.12}
+\AtBeginDocument{\fontsize{9}{11.2}\selectfont}
+\renewcommand{\arraystretch}{1.14}
 
-\captionsetup{font=small,labelfont=bf,labelsep=quad,skip=4pt}
-\setlength{\parskip}{2.5pt}
-\linespread{1.02}
-\setlength{\parindent}{0pt}
-\renewcommand{\arraystretch}{1.06}
-\usepackage{etoolbox}
-\AtBeginEnvironment{longtable}{\scriptsize}
-\AtBeginDocument{\fontsize{9}{11.4}\selectfont}
+\setlist[itemize]{leftmargin=2.2em,itemsep=1pt,topsep=3pt,parsep=0pt}
+\setlist[enumerate]{leftmargin=2.4em,itemsep=1pt,topsep=3pt,parsep=0pt}
 
+% ---- 图表题注：中文期刊习惯，"图 1　题名"，居中，黑体小五
+\DeclareCaptionFont{heifont}{\zihao{6}\heiti}
+\captionsetup{font=heifont,labelsep=quad,justification=centering,skip=5pt}
+\captionsetup[table]{position=top,skip=5pt}
+
+% ---- 页眉页脚
 \pagestyle{fancy}
 \fancyhf{}
-\renewcommand{\headrulewidth}{0pt}
-\fancyfoot[C]{\small\color{rule}\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{rule}\leaders\hrule height \headrulewidth\hfill}}
+\fancyhead[C]{\zihao{6}\songti SciAgent：意图驱动的全流程科研助手}
+\fancyfoot[C]{\zihao{6}\thepage}
 
-\usepackage{tcolorbox}
-\tcbuselibrary{skins,breakable}
-\newtcolorbox{aside}{
-  breakable, enhanced, colback=orange!4!white, colframe=orange!45!black,
-  boxrule=0pt, leftrule=2pt, arc=1pt, left=6pt, right=6pt, top=4pt, bottom=4pt,
-  fontupper=\small
-}
+% ---- 引文块：期刊通常用楷体缩进，不用彩色框
+\newenvironment{aside}{\par\vspace{2pt}\begingroup\zihao{5}\kaishu
+  \leftskip=2em\rightskip=2em\noindent\ignorespaces}{\par\endgroup\vspace{2pt}}
 
 \begin{document}
 """
@@ -256,11 +271,13 @@ def convert(md: str) -> str:
         m = re.match(r"^!\[([^\]]*)\]\(([^)]+)\)$", stripped)
         if m:
             caption, path = m.group(1), m.group(2)
+            # drop the hand-written "图 3-1 " prefix: the class numbers captions
+            caption = re.sub(r"^图\s*\d+[-−]\d+\s*", "", caption)
             out.append(r"\begin{figure}[htbp]")
             out.append(r"\centering")
-            out.append(r"\includegraphics[width=0.97\textwidth]{" +
+            out.append(r"\includegraphics[width=0.92\textwidth]{" +
                        path.replace("\\", "/") + "}")
-            out.append(r"\caption*{" + inline(caption) + "}")
+            out.append(r"\caption{" + inline(caption) + "}")
             out.append(r"\end{figure}")
             out.append("")
             i += 1
@@ -280,7 +297,6 @@ def convert(md: str) -> str:
             if level == 1:
                 out.append(r"\section*{" + title_tex + "}")
                 out.append(r"\addcontentsline{toc}{section}{" + title_tex + "}")
-                out.append(r"\vspace{-2pt}\hrule\vspace{6pt}")
             elif level == 2:
                 out.append(r"\subsection*{" + title_tex + "}")
                 out.append(r"\addcontentsline{toc}{subsection}{" + title_tex + "}")
