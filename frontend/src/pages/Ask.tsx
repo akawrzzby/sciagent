@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Module 2 — the anti-hallucination Q&A workbench.
  *
  * The agent stream is rendered live:
@@ -33,6 +33,12 @@ interface RefineRound {
   gap: string
   added: number
   total: number
+  /** claims the citations did not support in the draft that triggered this round */
+  unsupported: number
+  /** the draft's rule-based faithfulness before the extra retrieval */
+  faithfulness: number
+  /** how many claims that draft made in total */
+  claims: number
 }
 
 interface Turn {
@@ -140,6 +146,9 @@ export default function Ask() {
                     gap: String(ev.gap ?? ''),
                     added: 0,
                     total: 0,
+                    unsupported: Number(ev.unsupported ?? 0),
+                    faithfulness: Number(ev.faithfulness ?? 0),
+                    claims: Number(ev.claim_count ?? 0),
                   },
                 ],
               }))
@@ -322,23 +331,53 @@ export default function Ask() {
                     {t.refines.length > 0 && (
                       <div className="space-y-1">
                         {t.refines.map((r) => (
-                          <div
+                          <details
                             key={r.round}
-                            className="flex items-start gap-2 rounded-md border border-amber-300/70 bg-amber-50/60 px-2.5 py-1.5 dark:border-amber-800/70 dark:bg-amber-950/30"
+                            className="rounded-md border border-amber-300/70 bg-amber-50/60 px-2.5 py-1.5 dark:border-amber-800/70 dark:bg-amber-950/30"
                           >
-                            <span className="mt-0.5 font-mono text-[10px] text-amber-600">↻</span>
-                            <div className="min-w-0">
-                              <span className="font-sans text-[10.5px] font-semibold text-amber-700 dark:text-amber-300">
-                                自反馈第 {r.round} 轮
+                            <summary className="flex cursor-pointer list-none items-start gap-2">
+                              <span className="mt-0.5 font-mono text-[10px] text-amber-600">↻</span>
+                              <div className="min-w-0 flex-1">
+                                <span className="font-sans text-[10.5px] font-semibold text-amber-700 dark:text-amber-300">
+                                  自反馈第 {r.round} 轮
+                                </span>
+                                <span className="ml-2 font-sans text-[11px] text-ink-500 dark:text-ink-400">
+                                  {r.reason === 'empty_answer'
+                                    ? '生成结果为空，补检索后重试'
+                                    : '证据存在缺口，补检索后重写'}
+                                  {r.added > 0 && ` · 新增 ${r.added} 条证据（累计 ${r.total}）`}
+                                </span>
+                              </div>
+                              <span className="shrink-0 font-sans text-[10px] text-amber-600/80">
+                                展开
                               </span>
-                              <span className="ml-2 font-sans text-[11px] text-ink-500 dark:text-ink-400">
+                            </summary>
+                            <div className="mt-2 space-y-1.5 border-t border-amber-200/70 pt-2 font-sans text-[11px] leading-relaxed text-ink-600 dark:border-amber-800/60 dark:text-ink-300">
+                              <p>
+                                <span className="text-ink-400">为什么补检索　</span>
                                 {r.reason === 'empty_answer'
-                                  ? '生成结果为空，补检索后重试'
-                                  : '证据存在缺口，补检索后重写'}
-                                {r.added > 0 && ` · 新增 ${r.added} 条证据（累计 ${r.total}）`}
-                              </span>
+                                  ? '上一稿生成结果为空，用原问题重新检索后重写'
+                                  : `上一稿有 ${r.unsupported} 条断言没有被引用的段落支撑`
+                                    + (r.claims > 0
+                                      ? `（共 ${r.claims} 条断言，覆盖率 ${(r.faithfulness * 100).toFixed(1)}%）`
+                                      : '')}
+                              </p>
+                              {r.gap && (
+                                <p>
+                                  <span className="text-ink-400">补检索用的查询　</span>
+                                  <code className="rounded bg-white/70 px-1 py-0.5 font-mono text-[10.5px] dark:bg-ink-900/60">
+                                    {r.gap}
+                                  </code>
+                                </p>
+                              )}
+                              <p>
+                                <span className="text-ink-400">回填结果　</span>
+                                {r.added > 0
+                                  ? `新增 ${r.added} 条证据，累计 ${r.total} 条，答案按补充证据重写`
+                                  : '没有检索到新证据，停止自反馈'}
+                              </p>
                             </div>
-                          </div>
+                          </details>
                         ))}
                       </div>
                     )}
