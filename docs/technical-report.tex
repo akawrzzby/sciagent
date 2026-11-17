@@ -173,45 +173,45 @@ SciAgent 定位为面向科研文献的可溯源处理流水线，其设计遵�
 \bottomrule
 \endfoot
 ① 多模态细粒度文档解析 & \texttt{backend/app/parsing/} & 版式分析、栏检测、标题树推断、VLM OCR、语义去重 \\
-② 意图驱动 RAG + 抗幻觉 & \texttt{backend/app/rag/} + \texttt{backend/app/agents/} & BM25 + bge-m3 + RRF + cross-encoder、证据绑定、引用真实性校验 \\
-③ 版式阅读 + 中英联动 & \texttt{frontend/src/pages/Reader.tsx} & 双栏渲染、引用双向跳转、segment 对齐滚动 \\
+② 意图驱动检索与抗幻觉 & \texttt{backend/app/rag/}、\texttt{backend/app/agents/} & 稀疏检索、稠密检索、排名融合与交叉编码精排；证据绑定与引用真实性校验 \\
+③ 版式阅读与中英联动 & \texttt{frontend/src/pages/Reader.tsx} & 双栏渲染、引用双向跳转、段落对齐滚动 \\
 ④ arXiv 检索与追踪 & \texttt{backend/app/tools/sources.py} & arXiv API、GitHub Search、Function Calling 闭环 \\
 ⑤ 文献图谱与基石挖掘 & \texttt{backend/app/graph/} & PageRank、Betweenness、k-core、HITS \\
-⑥ 论文写作辅助 & \texttt{backend/app/api/routers/writing.py} + \texttt{tools/viz.py} & 框架生成、TikZ/Mermaid/Graphviz、CSV → 图表 + Caption \\
+⑥ 论文写作辅助 & \texttt{backend/app/api/routers/writing.py}、\texttt{tools/viz.py} & 框架生成、TikZ 与 Mermaid 及 Graphviz 绘图、由 CSV 数据生成图表与图注 \\
 \end{longtable}
 
 \subsubsection*{1.4 对照评分标准的自评}
-赛题说明书的评分标准包含五个维度：AI 技术深度 35\%、创新性 15\%、产品功能和工程质量 30\%、用户体验 10\%、实用性 10\%。本人在赛题官方材料中未查到细分到考察点的权重，故下表为本人所作的拆解：将五个维度展开为 18 个可核验的考察点，逐项给出实现位置、可核验证据与自评结论。表中百分比为本人用于内部排序的估计值。
+赛题说明书的评分标准包含五个维度：AI 技术深度 35\%、创新性 15\%、产品功能和工程质量 30\%、用户体验 10\%、实用性 10\%。本人在赛题官方材料中未查到细分到考察点的权重，故下表为本人所作的拆解：将五个维度展开为 18 项可核验的考察点，并给出其在系统中的实现位置与对应证据。
 
-\begin{longtable}{@{}p{0.10\textwidth}p{0.34\textwidth}p{0.30\textwidth}p{0.18\textwidth}@{}}
+\begin{longtable}{@{}p{0.17\textwidth}p{0.36\textwidth}p{0.43\textwidth}@{}}
 \toprule
-\textbf{考察点} & \textbf{本项目的实现位置} & \textbf{可核验的证据} & \textbf{自评} \\
+\textbf{考察点} & \textbf{实现位置} & \textbf{可核验证据} \\
 \midrule
 \endfirsthead
 \toprule
-\textbf{考察点} & \textbf{本项目的实现位置} & \textbf{可核验的证据} & \textbf{自评} \\
+\textbf{考察点} & \textbf{实现位置} & \textbf{可核验证据} \\
 \midrule
 \endhead
 \bottomrule
 \endfoot
-\textbf{Agent 架构 / Task Planning（9\%）} & \texttt{agents/orchestrator.py}：路由 → 规划 → ReAct 取证 → 带证据生成 → 自反馈 & 思考流在界面上逐步可见（intent / 任务计划 / 工具调用 / 补检索轮次）；SSE 事件表见 §9.1 & 强 \\
-\textbf{抗幻觉 RAG 与源头溯源（8\%）} & \texttt{rag/retriever.py}、\texttt{rag/sparse.py}、\texttt{rag/embeddings.py}、\texttt{llm/guardrails.py} & 混合检索（BM25 + bge-m3 + RRF + cross-encoder）；每条引用带 chunk\_id / 页码 / 字符区间，界面可点开原文；引用三分类 supporting / contrasting / mentioning；\textbf{三轮评测 faithfulness 0.8034 / traceability 1.0000}，库外对照题 \textbf{3/3 诚实拒答、0 编造}（§6.3.4–6.3.5） & 强 \\
-\textbf{多模态与细粒度解析（7\%）} & \texttt{parsing/}（版式分析、标题树、表格、图表、公式、参考文献、OCR） & 扫描件 15 页 OCR + 26 个章节节点（§6.4）；541 页书籍 149.4 s / 1254 章节 / 131 万字符（T24） & 强 \\
-\textbf{Function Calling 与工具集成（6\%）} & \texttt{tools/}（\texttt{search\_library} / \texttt{read\_passages} / \texttt{compare\_papers} / \texttt{arxiv\_*} / \texttt{github\_repos}） & 工具调用是模型真实选出的，trace 里逐条可见；arXiv 下载入库后可被检索命中 & 中上（外部 API 在部分网络环境不可达） \\
-\textbf{Prompt 与 Guardrails（5\%）} & \texttt{llm/prompts.py}（全部提示词集中一处，便于答辩审计）、\texttt{llm/guardrails.py} & \textbf{六层护栏}各自有单元测试（T18–T22 / T35–T37）；其中第 6 层"空答案即失败"是被一个真实缺陷逼出来的（§4.10） & 强 \\
-\textbf{学术算法与图谱挖掘创新（10\%）} & \texttt{graph/}：PageRank + Betweenness + k-core + HITS 联合判定基石 & 双指标视图（Prior / Derivative）；实测在 15 篇库上识别出基石论文（T16）；矛盾检测在 15 篇库上只剩 \textbf{1 条真实冲突}（Attention 两版本 BLEU 41.0 vs 41.8），误报清零（T33 / T42） & 中上（图谱规模受 15 篇仅 14 条互引边的限制） \\
-\textbf{技术方案与 RAG 创新（8\%）} & 语义去重 + 版本差异 diff + 元数据感知检索 + 按断言级引用修复 & arXiv v1/v7 去重并给出保留建议；作者块的重排分 0.058 → 0.719（§4.5）；\textbf{元数据感知检索 A/B：hit@5 0.9286 → 1.0000，唯一翻盘的是"按人名+年份提问"这类正文无法匹配的查询（§6.3.6）} & 强 \\
-\textbf{科研交互模式创新（7\%）} & \texttt{Reader.tsx}：标题树定位、引用双向跳转、中英对照联动 & 引用 \texttt{[11]} ↔ References 条目双向跳转；中英两侧按 segment 对齐滚动 & 强 \\
-\textbf{代码质量与全栈架构（4\%）} & 前端 TypeScript + 后端 Python，分层清晰 & 227 个用例全绿；AST 静态作用域检查固化为测试（T29） & 强 \\
-\textbf{架构可复现性与部署（3\%）} & \texttt{docker-compose.yml} + \texttt{backend/Dockerfile} + \texttt{frontend/Dockerfile} + \texttt{.env.example} & 一条命令 \texttt{cp .env.example .env \&\& docker compose up -d}；本地模型走 vLLM OpenAI 兼容端点 & 强 \\
-\textbf{渲染性能与内存优化（3\%）} & \texttt{rag/embeddings.py}（64 线程）、\texttt{parsing/}（并发 + 串行表格区）、\texttt{graph/} & 实测 13.8× 吞吐提升（7.2 → 99.7 passages/s）；向量索引按论文文件化 + mmap & 强 \\
-\textbf{真实科研痛点契合度（5\%）} & 六大工作台覆盖检索 → 精读 → 对比 → 写作全流程 & 见 §5 各模块 & 强 \\
-\textbf{功能闭环与测试用例通过率（5\%）} & 赛题点名的四类用例全部实现并实测 & 去重（v7→v1）、扫描件 OCR、541 页书籍、CSV → 图表 → TikZ/Mermaid（§6.2 / §6.4） & 强 \\
-\textbf{学术界面设计与可视化（4\%）} & \texttt{GraphWorkbench.tsx}（Cytoscape 三边视图 + 矛盾检测面板）、\texttt{WritingWorkbench.tsx} & 浏览器实地验收：图谱三视图、Prior/Derivative 双视图、矛盾检测面板均正常 & 强 \\
-\textbf{联动阅读与前端体验（3\%）} & \texttt{Reader.tsx} & 标题树定位到 \texttt{3.2.2 Multi-Head Attention}；引用双向跳转 & 中上（中英联动依赖对齐 segment，边缘 case 仍偏少） \\
-\textbf{AI 思考与流式渲染体验（3\%）} & SSE 事件流 + 前端思考面板 & Token 级流式；思考流可视化；自反馈补检索在界面上单独成条（"自反馈第 N 轮"） & 强 \\
-\textbf{学术赋能价值（AI4S，5\%）} & 整条流水线 & 见 §5 / §7 & 中上 \\
-\textbf{开源潜力与推广前景（5\%）} & 仓库结构、\texttt{.env.example}、Docker、复跑脚本 & \texttt{scripts/eval\_rag.py} 等评测脚本可现场复跑全部数字 & 强 \\
+Agent 架构与任务规划 & \texttt{agents/orchestrator.py} & 意图路由、任务规划、工具取证、带证据生成与自反馈五个环节均在界面的思考面板中逐步呈现；事件类型见 §9.1 \\
+抗幻觉检索与溯源 & \texttt{rag/retriever.py}、\texttt{rag/sparse.py}、\texttt{rag/embeddings.py}、\texttt{llm/guardrails.py} & 混合检索与交叉编码精排；每条引用携带分块标识、页码与字符区间，可在界面打开原文；引用按支持、对照、提及三类标注；三轮评测的忠实度为 0.8034，可溯源率为 1.0000；库外对照题三次均拒答且无编造，见 §6.3.4 与 §6.3.5 \\
+多模态与细粒度解析 & \texttt{parsing/} & 扫描件 15 页经识别后还原 26 个章节节点；541 页书籍耗时 149.4 秒，产出 1254 个章节节点与 131 万字符，见 §6.4 与 T24 \\
+工具调用与集成 & \texttt{tools/} & 工具由模型自主选择，调用过程在轨迹中逐条可见；经 arXiv 下载入库的论文可被检索命中 \\
+提示词与护栏 & \texttt{llm/prompts.py}、\texttt{llm/guardrails.py} & 六层护栏各有单元测试，见 T18 至 T22 与 T35 至 T37；第六层源于一处真实缺陷，见 §4.10 \\
+图谱算法 & \texttt{graph/} & 以四项中心性指标联合判定基石文献；在 15 篇的库上识别出基石论文，见 T16；矛盾检测在 15 篇的库上仅保留 1 条真实冲突，即 Attention 两个版本对同一任务分别报告 BLEU 41.0 与 41.8，误报为零，见 T33 与 T42 \\
+技术方案与检索创新 & 语义去重、版本差异比对、元数据感知检索、按断言级的引用修复 & arXiv v1 与 v7 判为同一论文并给出保留建议；作者块的重排分由 0.058 升至 0.719，见 §4.5；元数据感知检索的 top-5 命中率由 0.9286 升至 1.0000，发生位次变化的仅为人名与年份类查询，见 §6.3.6 \\
+科研交互模式 & \texttt{Reader.tsx} & 标题树定位、引用双向跳转、中英对照同步滚动 \\
+代码质量与架构 & 前端 TypeScript，后端 Python & 227 个用例通过；静态作用域检查已固化为测试，见 T29 \\
+可复现性与部署 & 容器编排文件、镜像定义、环境变量模板 & 以单条命令启动全栈；本地模型经兼容端点接入 \\
+渲染性能与内存 & \texttt{rag/embeddings.py}、\texttt{parsing/}、\texttt{graph/} & 在 64 线程下，编码吞吐由每秒 7.2 篇升至 99.7 篇，约为 13.8 倍；向量索引按论文文件化并以内存映射方式加载 \\
+科研场景契合度 & 六个工作台 & 覆盖检索、精读、对比与写作四个环节，见 §5 \\
+功能闭环与用例通过率 & 四类指定用例 & 版本去重、扫描件识别、541 页书籍解析、由 CSV 生成图表，见 §6.2 与 §6.4 \\
+界面设计与可视化 & \texttt{GraphWorkbench.tsx}、\texttt{WritingWorkbench.tsx} & 图谱三种边视图、基石与衍生双视图、矛盾检测面板均经浏览器实测 \\
+联动阅读与前端体验 & \texttt{Reader.tsx} & 标题树可定位至 \texttt{3.2.2 Multi-Head Attention}；引用双向跳转 \\
+思考过程与流式渲染 & 事件流与前端思考面板 & 令牌级流式输出；思考过程可视化；自反馈补检索单独成条 \\
+学术赋能价值 & 整条流水线 & 见 §5 与 §7 \\
+开源与复现 & 仓库结构、环境变量模板、容器编排、评测脚本 & 评测脚本可复跑全部数字 \\
 \end{longtable}
 
 \subsection*{2. 需求分析}
@@ -291,46 +291,46 @@ SciAgent 定位为面向科研文献的可溯源处理流水线，其设计遵�
 \endhead
 \bottomrule
 \endfoot
-解析性能 & 标准论文 < 5s & 版式分析纯 CPU；页面级并行；只在检测到扫描件时才走 OCR \\
-长文档 & 500+ 页不 OOM & 按页流式处理，向量按篇存 memmap，查询期只加载参与检索的论文 \\
-流式体验 & 首 token < 3s & 两阶段架构，先返回取证结果再生成；SSE 全链路关闭缓冲 \\
-鲁棒性 & 单通道故障不影响整体 & 稠密/重排/LLM 各自降级；后台任务异常隔离 \\
-可复现 & 一条命令起全栈 & \texttt{docker-compose.yml} + \texttt{.env.example} \\
-安全 & 密钥零泄露 & 12-factor 环境变量；\texttt{.env} 进 \texttt{.gitignore}；仓库无任何密钥 \\
-可审计 & 每次模型调用可追溯 & system/user prompt、工具参数、耗时、token 全部落盘 \\
+解析性能 & 标准论文的解析时间小于 5 秒 & 版式分析在处理器上完成；按页并行；仅对检测为扫描件的文档执行识别 \\
+长文档 & 500 页以上不发生内存溢出 & 按页流式处理；向量按篇以内存映射方式存放；查询期仅载入参与检索的论文 \\
+流式体验 & 首令牌延迟小于 3 秒 & 采用两阶段架构，取证结果先行返回；事件流全链路关闭缓冲 \\
+鲁棒性 & 单通道故障不影响整体可用性 & 稠密检索、重排与语言模型分别降级；后台任务异常隔离 \\
+可复现 & 以单条命令启动全栈 & 提供容器编排文件与环境变量模板 \\
+安全 & 密钥不外泄 & 密钥经环境变量注入；配置文件不纳入版本库；仓库内无任何密钥 \\
+可审计 & 每次模型调用可追溯 & 系统提示、用户提示、工具参数、耗时与令牌数全部落盘 \\
 \end{longtable}
 
 \subsubsection*{2.3 竞品与现有方案对比}
-表 2 将赛题相关的同类工作置于同一比较框架之下，各格均注明出处，以避免通用方案与本方案之间的空泛比较。
+本节选取赛题相关的八项同类工作，说明本文与它们在设计取舍上的异同，见表 2。
 
-\begin{longtable}{@{}p{0.157\textwidth}p{0.157\textwidth}p{0.157\textwidth}p{0.157\textwidth}p{0.157\textwidth}p{0.157\textwidth}@{}}
+\begin{longtable}{@{}p{0.22\textwidth}p{0.74\textwidth}@{}}
 \toprule
-\textbf{方案} & \textbf{解析深度} & \textbf{引用可溯源} & \textbf{矛盾检测} & \textbf{Agent 自主性} & \textbf{本文的借鉴与差异} \\
+\textbf{方案} & \textbf{本文的借鉴与差异} \\
 \midrule
 \endfirsthead
 \toprule
-\textbf{方案} & \textbf{解析深度} & \textbf{引用可溯源} & \textbf{矛盾检测} & \textbf{Agent 自主性} & \textbf{本文的借鉴与差异} \\
+\textbf{方案} & \textbf{本文的借鉴与差异} \\
 \midrule
 \endhead
 \bottomrule
 \endfoot
-\textbf{PaperQA2}<br>(arXiv:2409.13740) & 文本与元数据感知检索 & 页级引用 & 有，ContraCrow 报告每篇 2.34±1.99 条矛盾，其中 70\% 经专家验证 & agentic RAG 与 map-reduce & 借鉴其元数据感知检索与矛盾检测思路。差异在于 ContraCrow 依赖专门训练的矛盾检测器与大规模语料；本文因库内互引仅 14 条、训练素材不足，改走规则化路线 \\
-\textbf{OpenScholar}<br>(arXiv:2411.14199 / Nature 650:857–863) & 文本与 4500 万篇论文、2.36 亿向量 & 带引用，幻觉率 78\% 至 90\% & 依赖其引用图谱 & 自反馈推理循环 & 借鉴其自反馈循环与引用须可核验的设计。差异在于其规模不可复现；本文在 15 篇的库上将可核验性落实为可点击的字符区间锚点 \\
-\textbf{STORM}<br>(arXiv:2402.14207) & 文本 & 页级引用 & 无 & 多视角生成综述 & 借鉴其先大纲后写作的组织方式。本文未引入多智能体角色扮演层，理由见 §8.3 \\
-\textbf{Agent Laboratory}<br>(arXiv:2501.04227, EMNLP 2025) & 文本 & 阶段化产出 & 无 & 角色层级多智能体，成本降低 84\% & 借鉴其反思环节。该工作同时披露语言模型评审存在系统性高估：其自评为 6.1/10，人类评审为 3.8/10。本文因此不以模型自评作为效果证据，评测指标全部规则化 \\
-\textbf{Docling 与 PyMuPDF-Layout}<br>(arXiv:2408.09869) & 表格结构化 97.9\% & 无 & 无 & 无 & 在 DocLayNet 上 PyMuPDF-Layout 的 F1 为 0.8356，Docling 为 0.8102；前者参数量 1.8M，后者 20M，且前者无需 GPU。本文的选型依据即此组实测 \\
-\textbf{Scite、Elicit、Consensus} & 引用条目 & 引用原句与支持、对照、提及三分类 & 部分 & 弱 & 借鉴其引用三分类的标签体系。本文在三分类之上增加矛盾检测，判定过程全部可解释 \\
-\textbf{Connected Papers} & 无 & 无 & 无 & 无 & 借鉴其共引与共参考两种相似关系。本文将其实现为图谱的可切换边视图，而非独立站点 \\
-\textbf{SciAgent（本文）} & 结构化全要素，含标题树、表格、公式、图表与参考文献 & 是，含文献、页码、章节与字符区间 & 有，含数值冲突与结论冲突，规则化可解释 & 是，原生工具调用结合两阶段取证后生成 & — \\
+PaperQA2，arXiv:2409.13740 & 借鉴其元数据感知检索与矛盾检测思路。差异在于 ContraCrow 依赖专门训练的矛盾检测器与大规模语料；本文因库内互引仅 14 条、训练素材不足，改走规则化路线 \\
+OpenScholar，arXiv:2411.14199，发表于 Nature 650:857–863 & 借鉴其自反馈循环与引用须可核验的设计。差异在于其规模不可复现；本文在 15 篇的库上将可核验性落实为可点击的字符区间锚点 \\
+STORM，arXiv:2402.14207 & 借鉴其先大纲后写作的组织方式。本文未引入多智能体角色扮演层，理由见 §8.3 \\
+Agent Laboratory，arXiv:2501.04227，EMNLP 2025 & 借鉴其反思环节。该工作同时披露语言模型评审存在系统性高估：其自评为 6.1/10，人类评审为 3.8/10。本文因此不以模型自评作为效果证据 \\
+Docling 与 PyMuPDF-Layout，arXiv:2408.09869 & 在 DocLayNet 上 PyMuPDF-Layout 的 F1 为 0.8356，Docling 为 0.8102；前者参数量 1.8M，后者 20M，且前者无需 GPU。本文的选型依据即此组实测 \\
+Scite、Elicit、Consensus & 借鉴其引用三分类的标签体系。本文在三分类之上增加矛盾检测，判定过程全部可解释 \\
+Connected Papers & 借鉴其共引与共参考两种相似关系。本文将其实现为图谱的可切换边视图，而非独立站点 \\
+SciAgent，即本文 & — \\
 \end{longtable}
 
-上述比较的着眼点并非系统能否阅读文献，而在于其结论能否被证明。
+就解析深度而言，Docling 与 PyMuPDF-Layout 面向版面元素识别，其表格结构化率虽高，但不产出结构化的参考文献与章节树，也不解决图与公式的版面归属；本文的解析目标是全要素结构，即标题、作者、摘要、章节树、表格、图、公式与参考文献各自建模。
 
-\begin{enumerate}
-\item 可证明性以字符为单位：每条引用指向文献、页码、章节标题与正文起止字符，而非仅注明参考了某篇论文。
-\item 可解释性贯穿全链路：引用立场、矛盾判定与检索排序的元数据加权均附判定依据，可在界面逐条审计。
-\item 可举证性以数字呈现：§6.3 的三个指标在固定的 15 篇文献库上产出，并附可复跑脚本。
-\end{enumerate}
+就引用可溯源而言，PaperQA2 与 STORM 提供页级引用，Scite 一类工具提供引用原句与立场标签，OpenScholar 虽带引用但报告的幻觉率为 78\% 至 90\%。本文的锚点细至字符区间，即记录文献标识、页码、章节与正文起止位置，读者可据此定位到具体句子。
+
+就矛盾检测而言，PaperQA2 的 ContraCrow 报告每篇 2.34±1.99 条矛盾、其中 70\% 经专家验证，但其检测器需专门训练。本文以三条规则实现数值冲突与结论冲突的判定：同指标、同任务上下文、取值不同；规则化实现的可解释性更强，代价是召回受限于规则的覆盖范围。在 15 篇的库上，该模块仅保留 1 条真实冲突并将误报压至零，这一取舍与上一段的判断一致。
+
+上述比较的着眼点并非系统能否阅读文献，而在于其结论能否被证明。可证明性以字符为单位，每条引用指向具体位置，而非仅注明参考了某篇论文；可解释性贯穿全链路，引用立场、矛盾判定与检索排序的元数据加权均附判定依据；可举证性以数字呈现，§6.3 的三个指标在固定的 15 篇文献库上产出，并附可复跑脚本。
 
 \subsection*{3. 系统架构设计}
 \addcontentsline{toc}{subsection}{3. 系统架构设计}
@@ -511,9 +511,9 @@ Prompt 设计遵循三条原则。
 1 & \textbf{证据绑定} & \texttt{bind\_citations} & 删除无据引用标记，答案标记为 \texttt{supported: false}，UI 显示"已移除 N 个无据引用" \\
 2 & \textbf{引用真实性校验} & \texttt{validate\_references} & 幻觉引用进入"已拦截"列表，不进入最终参考文献 \\
 3 & \textbf{提示注入隔离} & \texttt{sanitize\_document\_text} & 文档中的指令被标记为不可信内容，模型不予执行 \\
-4 & \textbf{结构化输出校验} & \texttt{validate\_structure} + \texttt{complete\_json} & 缺字段时自动重试一次，仍未成功则降级 \\
+4 & 结构化输出校验 & \texttt{validate\_structure} 与 \texttt{complete\_json} & 缺字段时自动重试一次，仍未成功则降级 \\
 5 & \textbf{无据拒答} & \texttt{requires\_abstention} & 返回明确说明与三条可操作建议，不给猜测性答案 \\
-6 & \textbf{空答案即失败} & \texttt{\_generate\_answer} + \texttt{\_reflect} & 空的生成结果被判为\textbf{生成失败}，不再视为没有断言的正确答案：触发自反馈重试并将预算翻倍、发出 \texttt{generation\_failed} 事件、护栏判为不通过；重试后仍为空则\textbf{诚实拒答}，不返回空字符串 \\
+6 & 空答案按生成失败处理 & \texttt{\_generate\_answer} 与 \texttt{\_reflect} & 空的生成结果被判为\textbf{生成失败}，不再视为没有断言的正确答案：触发自反馈重试并将预算翻倍、发出 \texttt{generation\_failed} 事件、护栏判为不通过；重试后仍为空则\textbf{诚实拒答}，不返回空字符串 \\
 \end{longtable}
 
 这六层彼此独立。即便第 1 层漏掉一个引用编号，第 2 层仍会检查参考文献真实性；即便模型绕过前四层，第 5 层的空证据检查仍会触发；即便模型给出了正文，第 6 层还会检查该正文是否确实生成。由此构成纵深防御。
@@ -591,11 +591,11 @@ VLM OCR 由 \texttt{app/parsing/ocr.py} 实现：页面文本层字符数低于�
 
 \begin{longtable}{@{}p{0.22\textwidth}p{0.74\textwidth}@{}}
 \toprule
-\textbf{配置} & \textbf{吞吐（passages/s）} \\
+\textbf{配置} & \textbf{吞吐，单位为 passages/s} \\
 \midrule
 \endfirsthead
 \toprule
-\textbf{配置} & \textbf{吞吐（passages/s）} \\
+\textbf{配置} & \textbf{吞吐，单位为 passages/s} \\
 \midrule
 \endhead
 \bottomrule
@@ -603,7 +603,7 @@ VLM OCR 由 \texttt{app/parsing/ocr.py} 实现：页面文本层字符数低于�
 \texttt{torch.get\_num\_threads() = 192}，默认值 & \textbf{7.2} \\
 显式设为 32 线程 & 76.0 \\
 \textbf{显式设为 64 线程} & \textbf{99.7} \\
-192 线程 + \texttt{max\_seq\_length=256} & 99.5 \\
+192 线程，\texttt{max\_seq\_length} 取 256 & 99.5 \\
 \end{longtable}
 
 结论：显式限制线程数是必要的优化。实现见 \texttt{app/rag/embeddings.py::\_configure\_threads}，由 \texttt{EMBEDDING\_THREADS} 控制，默认 64。对应到完整索引 3000 个分块，耗时由 7 分钟降至 30 秒。
@@ -1023,7 +1023,7 @@ T46 & 两栏不误并公式 & 左右两栏各自的公式不被跨栏合并 & �
 \endhead
 \bottomrule
 \endfoot
-1 & 跨论文对比题\textbf{未产出任何断言} & 答案为一张 Markdown 表格，断言抽取将表格整行丢弃 & 表格单元格还原为「行标签 + 值 + 引用」形式的断言，值与原引用的绑定关系得以保留 \\
+1 & 跨论文对比题\textbf{未产出任何断言} & 答案为一张 Markdown 表格，断言抽取将表格整行丢弃 & 表格单元格还原为「行标签、值、引用」构成的断言，值与原引用的绑定关系得以保留 \\
 2 & 单论文题忠实度接近 0 & 引文仅截取段落\textbf{前 320 字符}，而 chunk 平均长度为 \textbf{1274 字符}；第 6 位作者位于第 1000 个字符处，\textbf{事实已在证据之中却被判为未支持} & 核验改为对\textbf{整段原文}进行；界面引文改为「真正支持该断言的那一句」 \\
 3 & 断言本身正确而忠实度仍低 & 「who / listed / affiliated」一类\textbf{框架词}被计入分母，此类词属于句式框架，不构成断言内容 & 扩充学术语体停用词表，纳入框架词与通用学术动词 \\
 4 & 「The paper notes that X」被整句判为未支持 & \textbf{归属前缀不属于断言内容}，原文中不会出现「the paper notes」 & 增加归属前缀剥离规则 \\
@@ -1226,7 +1226,7 @@ hit@5 上 0.07 的差异具有可解释性，并指向具体机制：补足「�
 Cross-encoder 重排 & \textasciitilde{}0.7 passages/s，Top-24 批量 & CPU \\
 模型权重下载 & 2.27 GB / 约 4 min & ModelScope 24 路并发分块 \\
 cloudflared 二进制下载 & 40.3 MB / 约 2 min & GitHub Release 48 路并发分块，单连接仅 15 KB/s \\
-前端生产构建 & 4.3 s & Vite 5 + Tailwind 3 \\
+前端生产构建 & 4.3 s & Vite 5 与 Tailwind 3 \\
 前端 CSS 产物 & 40.2 KB，gzip 后 7.2 KB & Tailwind 展开后 \\
 自动化测试 & 容器内 227 passed / 9 skipped，2.4 s；主机 236 passed，52 s & 无网络、无 LLM \\
 批量入库，15 篇 & 约 6 min，并发 3 & 串行版本需 10 min 以上 \\
@@ -1304,9 +1304,9 @@ SSE 的部署要点：\texttt{deploy/nginx.conf} 中的 \texttt{proxy\_buffering
 \bottomrule
 \endfoot
 apt 源 & 官方 \texttt{deb.debian.org} 约 355 KB/s，26 MB 包 40 s 未完成；清华镜像 \textbf{7.5 MB/s}，快 \textbf{21 倍} & 构建日志实测 \texttt{Fetched 10.2 MB in 4s (2331 kB/s)}；\texttt{DEBIAN\_MIRROR} / \texttt{DEBIAN\_SECURITY\_MIRROR} 可切回官方源 \\
-后端镜像构建 & apt 28.4 s + pip 190.3 s + 导出 13.6 s，合计约 \textbf{4 min} & 换源前同一构建耗时超过 15 分钟仍未完成 \\
+后端镜像构建 & apt 28.4 秒、pip 190.3 秒、导出 13.6 秒，合计约 4 分钟 & 换源前同一构建耗时超过 15 分钟仍未完成 \\
 后端镜像体积 & \textbf{1.19 GB}，其中 site-packages 521 MB & 默认不安装编译工具链，省约 570 MB，亦不安装 torch，省约 2 GB，二者均可用构建参数开启 \\
-前端镜像体积 & \textbf{102 MB} & Nginx + Vite 产物 \\
+前端镜像体积 & 102 MB & Nginx 与 Vite 产物 \\
 容器内测试 & \textbf{227 passed / 9 skipped / 2.4 s} & 9 个跳过项源于镜像内缺少真实 PDF 与 bge-m3 权重；同一套用例在有 PDF 与权重的主机上为 236 passed \\
 compose 全栈 & backend / frontend 均 healthy；\texttt{/}、\texttt{/ask}、\texttt{/api/health} 全部 200 & Nginx 反向代理与 SPA history fallback \\
 缺依赖降级 & \texttt{llm.ok=false}、\texttt{dense\_available=false} 时自动退回 BM25 & 检索不中断，接口照常返回 \\
@@ -1499,7 +1499,7 @@ GET & \texttt{/api/rag/chunks/\{paper\_id\}} & 分块列表 \\
 GET & \texttt{/api/reader/\{id\}/pages} \texttt{/page/\{n\}/image} \texttt{/citations} \texttt{/reference/\{n\}} \texttt{/translation} & 阅读器数据 \\
 POST & \texttt{/api/reader/translate} & 片段翻译 \\
 POST & \texttt{/api/graph} \texttt{/future-work} \texttt{/review} & 图谱（\texttt{view} 可选 \texttt{citation}/\texttt{co\_citation}/\texttt{co\_reference}/\texttt{all}）、Future Work、自动综述 \\
-POST & \texttt{/api/graph/contradictions} & \textbf{矛盾检测}：数值冲突 + 结论冲突，双方原句 + 置信度 \\
+POST & \texttt{/api/graph/contradictions} & 矛盾检测：数值冲突与结论冲突，附双方原句与置信度 \\
 GET & \texttt{/api/graph/citations/quality} & 引用质量分析（含支持/对照/提及统计） \\
 POST & \texttt{/api/search/arxiv} \texttt{/download} \texttt{/recommend} \texttt{/feedback} & arXiv 检索、下载、推荐、反馈 \\
 GET & \texttt{/api/search/recent} \texttt{/reproducibility} & 分类追踪、可复现性检查 \\
