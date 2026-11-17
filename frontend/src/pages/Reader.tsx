@@ -571,6 +571,42 @@ export default function Reader() {
   )
 
   /* -------------------------------------------------- citation navigation */
+  // Clicking a marker shows the entry it points at; the jump happens only when
+  // the reader asks for it.  A marker is a reference to something, so showing
+  // the reference is the expected result of the click, and moving the page
+  // under the reader is a separate decision.
+  const [citeCard, setCiteCard] = useState<{ n: string; text: string } | null>(null)
+
+  const openCitation = useCallback(
+    (marker: string) => {
+      const n = String(marker).split(/[,;\s-]/)[0]
+      const fromDocument = paperDoc?.blocks.find(
+        (block) => block.kind === 'reference' && block.number === n,
+      )
+      if (fromDocument) {
+        setCiteCard({ n, text: fromDocument.text ?? '' })
+        return
+      }
+      if (!id) return
+      api
+        .reference(id, Number.parseInt(n, 10))
+        .then((ref) => setCiteCard({ n, text: String(ref.raw_text ?? '') }))
+        .catch(() => setToast(`文献库中没有 [${n}] 这一条`))
+    },
+    [id, paperDoc],
+  )
+
+  const scrollToReference = (n: string) => {
+    const el = document.querySelector<HTMLElement>(`[data-cite="${n}"]`)
+    if (!el) {
+      setToast(`参考文献 [${n}] 不在本文中`)
+      return
+    }
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el.classList.add('doc-reference-hit')
+    window.setTimeout(() => el.classList.remove('doc-reference-hit'), 1600)
+  }
+
   const jumpToReference = async (n: number) => {
     setActiveRef(n)
     const ref = await api.reference(id!, n)
@@ -747,7 +783,7 @@ export default function Reader() {
               <DocumentView
                 doc={paperDoc}
                 lang={mode === 'zh' ? 'zh' : 'en'}
-                onCite={(marker) => jumpToReference(Number.parseInt(marker, 10))}
+                onCite={openCitation}
               />
             </div>
           ) : (
@@ -838,6 +874,35 @@ export default function Reader() {
           )}
         </section>
       </div>
+
+      {/* ------------------------------------------------- citation card */}
+      <Modal
+        open={citeCard !== null}
+        onClose={() => setCiteCard(null)}
+        title={citeCard ? `引用 [${citeCard.n}]` : '引用'}
+      >
+        {citeCard && (
+          <div className="space-y-3">
+            <p className="max-h-64 overflow-y-auto font-serif text-sm leading-relaxed text-ink-700 dark:text-parchment-200">
+              {citeCard.text || '这条引用没有可显示的文本'}
+            </p>
+            <div className="flex justify-end gap-2">
+              <button className="btn-secondary !py-1 !text-[12px]" onClick={() => setCiteCard(null)}>
+                关闭
+              </button>
+              <button
+                className="btn-primary !py-1 !text-[12px]"
+                onClick={() => {
+                  scrollToReference(citeCard.n)
+                  setCiteCard(null)
+                }}
+              >
+                跳到参考文献
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* ------------------------------------------------- reference modal */}
       <Modal

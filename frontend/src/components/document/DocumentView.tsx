@@ -108,8 +108,18 @@ function BlockContent({ block, lang, onCite }: BlockContentProps): ReactNode {
   if (block.kind === 'formula') return <FormulaBlock block={block} />
 
   if (block.kind === 'footnote' || block.kind === 'reference') {
+    const isReference = block.kind === 'reference'
     return (
-      <p className={block.kind === 'footnote' ? 'doc-footnote' : 'doc-reference'}>
+      <p
+        className={isReference ? 'doc-reference' : 'doc-footnote'}
+        // The anchor a citation marker jumps to: `data-cite` is the number the
+        // body prints, `id` is what the reader can scroll to directly.
+        id={isReference ? block.id : undefined}
+        data-cite={isReference ? block.number : undefined}
+      >
+        {isReference && block.number ? (
+          <span className="doc-reference-number">[{block.number}]</span>
+        ) : null}
         <SentenceText
           sentences={block.sentences}
           text={block.text}

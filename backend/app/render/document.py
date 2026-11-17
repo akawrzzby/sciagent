@@ -719,6 +719,54 @@ def _drop_shadowed(blocks: list[Block]) -> list[Block]:
     return kept
 
 
+def _looks_like_reference(text: str) -> bool:
+    """True for a line that could be a bibliography entry.
+
+    The reference extractor also collects numbered lists, figure labels and
+    instructions ("Remove any phrases between matching brackets"), which would
+    otherwise be printed as if they were cited works.  These three tests reject
+    the obvious cases without guessing at the citation style.
+    """
+    stripped = text.strip()
+    if not stripped or stripped[0] in "•-/–—*":
+        return False
+    words = stripped.split()
+    if len(words) < 5:
+        return False
+    digits = sum(1 for ch in stripped if ch.isdigit())
+    if digits > len(stripped) * 0.45:
+        return False  # a row of numbers copied out of a table or a chart
+    return True
+
+
+def _reference_blocks(references: list[dict[str, Any]], segments: _Segments) -> list[Block]:
+    """The bibliography, as its own section at the end of the document.
+
+    The reading view used to end with the last paragraph: the paper cites
+    ``[11]`` but the list it points at was never rendered, so nothing could be
+    jumped to.  The printed entry is kept as it appears in the paper; the parsed
+    fields are not always reliable enough to rebuild it.
+    """
+    if not references:
+        return []
+    heading = Block(kind="heading", id="references", level=2, text="参考文献",
+                    target="参考文献")
+    out = [heading]
+    for item in references:
+        number = str(item.get("index_in_doc") or "").strip()
+        text = _normalise(item.get("raw_text") or "")
+        if not text or not _looks_like_reference(text):
+            continue
+        out.append(Block(
+            kind="reference",
+            id=f"ref-{number}",
+            number=number,
+            text=text,
+            target=segments.target(text),
+        ))
+    return out if len(out) > 1 else []
+
+
 async def build_document(paper_id: str, lang: str = "zh") -> Document | None:
     """Re-lay out one paper for the reading view.
 
@@ -770,6 +818,7 @@ async def build_document(paper_id: str, lang: str = "zh") -> Document | None:
     blocks = _drop_front_matter(blocks, title, _author_names(paper.get("authors")))
     blocks = _drop_shadowed(blocks)
     blocks = _sort_by_layout(blocks)
+    blocks.extend(_reference_blocks(list(structure.get("references") or []), segments))
 
     abstract = _normalise(paper.get("abstract") or "")
     document = Document(

@@ -75,8 +75,13 @@ class Block:
                                 "id": self.id, "bbox": self.bbox}
         if self.kind == "heading":
             data.update(level=self.level, text=self.text, target=self.target)
-        elif self.kind in ("paragraph", "footnote", "reference"):
+        elif self.kind in ("paragraph", "footnote"):
             data.update(text=self.text, target=self.target,
+                        sentences=[asdict(s) for s in self.sentences])
+        elif self.kind == "reference":
+            # ``number`` is the marker the body cites (``[11]``) and the anchor
+            # the reader jumps to.
+            data.update(text=self.text, target=self.target, number=self.number,
                         sentences=[asdict(s) for s in self.sentences])
         elif self.kind == "list":
             data.update(items=self.items, sentences=[asdict(s) for s in self.sentences])
