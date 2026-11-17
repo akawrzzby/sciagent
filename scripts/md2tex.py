@@ -69,6 +69,9 @@ PREAMBLE = r"""\documentclass[UTF8,fontset=windows,zihao=5,a4paper]{ctexart}
 \setlist[itemize]{leftmargin=2.2em,itemsep=1pt,topsep=3pt,parsep=0pt}
 \setlist[enumerate]{leftmargin=2.4em,itemsep=1pt,topsep=3pt,parsep=0pt}
 
+% 行内代码与正文视觉同号：等宽字体的 x 高度偏小，等比放大一档
+\renewcommand{\texttt}[1]{{\ttfamily\fontsize{9.2}{11}\selectfont #1}}
+
 % ---- 图表题注：中文期刊习惯，"图 1　题名"，居中，黑体小五
 \DeclareCaptionFont{heifont}{\zihao{6}\heiti}
 \captionsetup{font=heifont,labelsep=quad,justification=centering,skip=5pt}
@@ -183,30 +186,41 @@ def split_row(line: str) -> list[str]:
     return [c.strip() for c in cells]
 
 
-def table_tex(header: list[str], rows: list[list[str]]) -> str:
-    columns = len(header)
-    if columns == 1:
-        spec = r"@{}p{0.96\textwidth}@{}"
-    elif columns == 2:
-        spec = r"@{}p{0.22\textwidth}p{0.74\textwidth}@{}"
-    elif columns == 3:
-        spec = r"@{}p{0.17\textwidth}p{0.36\textwidth}p{0.43\textwidth}@{}"
-    elif columns == 4:
-        spec = r"@{}p{0.10\textwidth}p{0.34\textwidth}p{0.30\textwidth}p{0.18\textwidth}@{}"
-    elif columns == 5:
-        spec = (r"@{}p{0.12\textwidth}p{0.23\textwidth}p{0.21\textwidth}"
-                r"p{0.19\textwidth}p{0.19\textwidth}@{}")
-    else:
-        width = 0.94 / columns
-        spec = "@{}" + "".join(f"p{{{width:.3f}\\textwidth}}" for _ in range(columns)) + "@{}"
+def _cell_len(cell: str) -> int:
+    """Width proxy for a cell: code spans count as their own length, not markers."""
+    return len(re.sub(r"`([^`]*)`", r"\1", cell))
 
-    out = [r"\begin{longtable}{" + spec + "}", r"\toprule"]
-    out.append(" & ".join(r"\textbf{" + inline(c) + "}" for c in header) + r" \\")
-    out.append(r"\midrule")
+
+def table_tex(header: list[str], rows: list[list[str]]) -> str:
+    # a leading "#" column that just numbers the rows adds nothing: drop it
+    if header and header[0].strip() in ("#", "") and rows:
+        first = [r[0].strip() if r else "" for r in rows]
+        if all(f.isdigit() for f in first) and [int(f) for f in first] == list(
+                range(1, len(first) + 1)):
+            header = header[1:]
+            rows = [r[1:] for r in rows]
+
+    columns = len(header)
+    # widths proportional to the amount of text each column carries
+    weights = []
+    for index in range(columns):
+        values = [_cell_len(r[index]) if index < len(r) else 0 for r in rows]
+        values.append(_cell_len(header[index]) * 2)
+        mean = sum(values) / len(values)
+        weights.append(max(mean, 3.0) ** 0.62)
+    total = sum(weights)
+    widths = [max(0.075, 0.96 * w / total) for w in weights]
+    scale = 0.96 / sum(widths)
+    widths = [w * scale for w in widths]
+    spec = "@{}" + "".join(f"p{{{w:.3f}\\textwidth}}" for w in widths) + "@{}"
+
+    header_tex = " & ".join(
+        r"\multicolumn{1}{c}{\textbf{" + inline(c) + "}}" for c in header
+    ) + r" \\"
+
+    out = [r"\begin{longtable}{" + spec + "}", r"\toprule", header_tex, r"\midrule"]
     out.append(r"\endfirsthead")
-    out.append(r"\toprule")
-    out.append(" & ".join(r"\textbf{" + inline(c) + "}" for c in header) + r" \\")
-    out.append(r"\midrule")
+    out.extend([r"\toprule", header_tex, r"\midrule"])
     out.append(r"\endhead")
     out.append(r"\bottomrule")
     out.append(r"\endfoot")
