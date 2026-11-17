@@ -67,6 +67,17 @@ def _page(entry: dict[str, Any]) -> int:
         return 0
 
 
+def _order(entry: dict[str, Any]) -> float:
+    """The parser's column-aware reading position of a block.
+
+    Zero means "unknown": the block is placed by :func:`_place_media` instead.
+    """
+    try:
+        return float(entry.get("order_index") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 # ---------------------------------------------------------------------- translations
 class _Segments:
     """The translation segments of one paper, indexed for the lookups below.
@@ -139,8 +150,21 @@ def _sentences(block_id: str, text: str, segments: _Segments) -> list[Sentence]:
 
 
 # ---------------------------------------------------------------------------- blocks
-def _heading_blocks(sections: list[dict[str, Any]], segments: _Segments) -> list[Block]:
-    """One heading block per node of the section tree."""
+def _heading_blocks(sections: list[dict[str, Any]], segments: _Segments,
+                    blocks: list[dict[str, Any]] | None = None) -> list[Block]:
+    """One heading block per node of the section tree.
+
+    A section row carries no reading position, but the same title also arrives
+    as a ``text`` block, which does.  That block is the one the order is taken
+    from; without it a heading would sort to the top of its page.
+    """
+    positions: dict[tuple[str, int], float] = {}
+    for block in blocks or []:
+        key = (_normalise(block.get("content") or "").lower(), _page(block))
+        order = _order(block)
+        if order:
+            positions.setdefault(key, order)
+
     out: list[Block] = []
     for section in sections:
         title = _normalise(section.get("title") or "")
@@ -150,14 +174,21 @@ def _heading_blocks(sections: list[dict[str, Any]], segments: _Segments) -> list
         # The reading view numbers its headings from 2 (1 is the paper title),
         # so a top level section is 2 and each level below adds one.
         level = int(section.get("level") or 1) + 1
+        label = f"{number} {title}".strip()
+        page = _page(section)
+        # Section rows number themselves on their own scale (0, 1, 2 …), which
+        # cannot be compared with the block positions; only the text block that
+        # carries the same title is on the right scale.
+        order = positions.get((label.lower(), page), 0.0)
         out.append(Block(
             kind="heading",
-            page_no=_page(section),
+            page_no=page,
             bbox=_bbox(section.get("bbox")),
             id=str(section.get("id") or ""),
             level=max(2, level),
-            text=f"{number} {title}".strip(),
+            text=label,
             target=segments.target(title),
+            order=order,
         ))
     return out
 
@@ -188,6 +219,7 @@ def _paragraph_blocks(blocks: list[dict[str, Any]], segments: _Segments,
             text=text,
             target=" ".join(s.target for s in sentences if s.target),
             sentences=sentences,
+            order=_order(block),
         ))
     return out
 
@@ -284,15 +316,61 @@ def _formula_block(formula: dict[str, Any], paper_id: str) -> Block:
     )
 
 
-def _reading_key(block: Block) -> tuple[int, float, float]:
-    """Reading position: page, then the top of the block, then its left edge.
+def _reading_key(block: Block) -> tuple[int, float, float, float]:
+    """Reading position: page, then the parser's column-aware order.
 
-    A block without a bbox has no position on the page, so it goes to the end
-    of its page instead of pretending to stand at the top.
+    Sorting by the top of the box interleaves the two columns of a paper: the
+    left column stops halfway down the page, so every right-column paragraph
+    lands between the last left-column paragraph and the next one.  ``order``
+    comes from the parser, which already walks the paper column by column;
+    the box is only the tie breaker and the fallback.
     """
-    if len(block.bbox) >= 4:
-        return (block.page_no, block.bbox[1], block.bbox[0])
-    return (block.page_no, float("inf"), float("inf"))
+    y = block.bbox[1] if len(block.bbox) >= 4 else float("inf")
+    x = block.bbox[0] if len(block.bbox) >= 4 else float("inf")
+    return (block.page_no, block.order, y, x)
+
+
+def _place_media(blocks: list[Block]) -> None:
+    """Give every table, figure and formula a slot among the paragraphs.
+
+    The parser numbers the text blocks of a page but not the objects, so an
+    object would otherwise sort to the top of its page.  Each one is placed
+    just before the first numbered block that starts below it in the same
+    column.
+    """
+    by_page: dict[int, list[Block]] = {}
+    for block in blocks:
+        by_page.setdefault(block.page_no, []).append(block)
+
+    for items in by_page.values():
+        numbered = [b for b in items if b.order > 0 and len(b.bbox) >= 4]
+        if not numbered:
+            for block in items:
+                if block.order <= 0:
+                    block.order = 0.5
+            continue
+        edges = [b.bbox[0] for b in numbered] + [b.bbox[2] for b in numbered]
+        middle = (min(edges) + max(edges)) / 2
+        span = max(edges) - min(edges)
+        numbered.sort(key=lambda b: (b.order, b.bbox[1]))
+        for block in items:
+            if block.order > 0:
+                continue
+            if len(block.bbox) < 4:
+                block.order = numbered[-1].order + 0.5
+                continue
+            column = 0 if block.bbox[0] < middle else 1
+            # A figure or a table often spans both columns; it then belongs
+            # above everything that starts below its bottom edge.
+            wide = (block.bbox[2] - block.bbox[0]) > span * 0.6
+            placed = None
+            for other in numbered:
+                other_column = 0 if other.bbox[0] < middle else 1
+                below = other.bbox[1] >= (block.bbox[3] if wide else block.bbox[1])
+                if below and (wide or other_column == column):
+                    placed = other.order - 0.5
+                    break
+            block.order = placed if placed is not None else numbered[-1].order + 0.5
 
 
 def _author_names(value: Any) -> list[str]:
@@ -358,7 +436,7 @@ def _drop_shadowed(blocks: list[Block]) -> list[Block]:
     media = [b for b in blocks if b.kind in ("table", "figure")]
     figures = [b for b in media if b.kind == "figure"]
     headings = {
-        (_normalise(b.text).lower(), b.page_no) for b in blocks if b.kind == "heading"
+        (_normalise(b.text).lower(), b.page_no): b for b in blocks if b.kind == "heading"
     }
 
     kept: list[Block] = []
@@ -368,6 +446,13 @@ def _drop_shadowed(blocks: list[Block]) -> list[Block]:
             continue
         if block.kind == "paragraph" and (
                 (_normalise(block.text).lower(), block.page_no) in headings):
+            # The heading owns this text, but the body block carries the
+            # reading position, so it is handed over before the duplicate goes.
+            heading = headings[(_normalise(block.text).lower(), block.page_no)]
+            if not heading.order:
+                heading.order = block.order
+            if len(heading.bbox) < 4:
+                heading.bbox = block.bbox
             continue
         if block.kind == "formula":
             if any(_centre_inside(block.bbox, figure.bbox) for figure in figures):
@@ -413,13 +498,15 @@ async def build_document(paper_id: str, lang: str = "zh") -> Document | None:
     } - {""}
 
     blocks: list[Block] = []
-    blocks.extend(_heading_blocks(list(structure.get("sections") or []), segments))
+    blocks.extend(_heading_blocks(list(structure.get("sections") or []), segments,
+                                  list(structure.get("blocks") or [])))
     blocks.extend(_paragraph_blocks(list(structure.get("blocks") or []),
                                     segments, attached_captions))
     blocks.extend(_table_block(table, paper_id, segments) for table in tables)
     blocks.extend(_figure_block(figure, paper_id, segments) for figure in figures)
     blocks.extend(_formula_block(formula, paper_id) for formula in formulas)
     blocks = _drop_shadowed(blocks)
+    _place_media(blocks)
     # Python's sort is stable, so elements that share a position keep the
     # order they were collected in.
     blocks.sort(key=_reading_key)

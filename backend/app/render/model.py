@@ -66,6 +66,9 @@ class Block:
     latex: str = ""
     number: str = ""
     note: str = ""
+    #: position in the parser's column-aware reading order; media blocks get a
+    #: fractional value so they fall next to the paragraph they belong to
+    order: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {"kind": self.kind, "page_no": self.page_no,

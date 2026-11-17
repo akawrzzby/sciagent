@@ -35,6 +35,16 @@ PREAMBLE = r"""\documentclass[UTF8,fontset=windows,zihao=5,a4paper]{ctexart}
 \usepackage{fancyvrb}
 \usepackage{fvextra}
 \usepackage[hidelinks]{hyperref}
+\usepackage{amssymb}
+
+% ---- 代码块字形：Latin Modern 缺 ─ │ ├ └ 等制表符，树形图会断线；改用 Consolas
+\newfontfamily\codefont{Consolas}
+\fvset{formatcom=\codefont}
+% ---- ✓ 与下标数字：正文字体无此字形，改为符号/排版命令
+\catcode`\✓=13 \def✓{\ensuremath{\checkmark}}
+\catcode`\₁=13 \def₁{\textsubscript{1}}
+\catcode`\₂=13 \def₂{\textsubscript{2}}
+\catcode`\ﬀ=13 \defﬀ{ff}
 
 \definecolor{ink}{HTML}{000000}
 \definecolor{accent}{HTML}{8C2F00}
@@ -90,7 +100,7 @@ PREAMBLE = r"""\documentclass[UTF8,fontset=windows,zihao=5,a4paper]{ctexart}
   \leftskip=2em\rightskip=2em\noindent\ignorespaces}{\par\endgroup\vspace{2pt}}
 
 % ---- 圈号 ①② 与带圈字母：xeCJK 默认不把这两段交给中文字体，需显式指定
-\xeCJKDeclareCharClass{CJK}{"2460 -> "24FF, "3200 -> "33FF}
+\xeCJKDeclareCharClass{CJK}{"2460 -> "24FF, "3200 -> "33FF, "2264 -> "2265, "2211, "03B2}
 
 \begin{document}
 """

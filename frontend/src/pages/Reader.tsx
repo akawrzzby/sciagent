@@ -692,7 +692,10 @@ export default function Reader() {
               <li key={s.id}>
                 <button
                   onClick={() => {
+                    // The faithful layout tags each section wrapper; the
+                    // re-laid-out view gives the heading itself the id.
                     const el = document.querySelector<HTMLElement>(`[data-section="${s.id}"]`)
+                      ?? document.getElementById(s.id)
                     el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
                   }}
                   className={[

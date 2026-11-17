@@ -1,12 +1,20 @@
 # Fdb version 4
-["xdvipdfmx"] 1794906359.67867 "technical-report.xdv" "technical-report.pdf" "technical-report" 1794906359.67637 2
-  "technical-report.xdv" 1794906359 791344 aaef1703b7b46efd64039ac4dc12391f "xelatex"
+["xdvipdfmx"] 1794910533.21929 "technical-report.xdv" "technical-report.pdf" "technical-report" 1794910536.52537 0
+  "technical-report.xdv" 1794910533 792284 86f8b682a25ea1b2cda08b1824ce2c87 "xelatex"
   (generated)
   "technical-report.pdf"
   (rewritten before read)
-["xelatex"] 1794906358.10538 "technical-report.tex" "technical-report.xdv" "technical-report" 1794906359.73839 0
+["xelatex"] 1794910531.64698 "e:/西交/研究生/比赛/AI大模型创新应用挑战赛/sciagent/docs/technical-report.tex" "technical-report.xdv" "technical-report" 1794910536.5222 0
   "c:/Windows/Fonts/msyh.ttc" 1757965192 19704352 1e10e74402e59d54499af795caf0b135 ""
   "c:/tools/tex/texlive/texmf-dist/fonts/tfm/adobe/zapfding/pzdr.tfm" 1794885470 1528 7e12f4c0fcf5a072cebdcfbfc610f54c ""
+  "c:/tools/tex/texlive/texmf-dist/fonts/tfm/public/amsfonts/cmextra/cmex7.tfm" 1794885172 1004 54797486969f23fa377b128694d548df ""
+  "c:/tools/tex/texlive/texmf-dist/fonts/tfm/public/amsfonts/cmextra/cmex9.tfm" 1794885172 996 a18840b13b499c08ac2de96a99eda4bc ""
+  "c:/tools/tex/texlive/texmf-dist/fonts/tfm/public/amsfonts/symbols/msam10.tfm" 1794885172 916 f87d7c45f9c908e672703b83b72241a3 ""
+  "c:/tools/tex/texlive/texmf-dist/fonts/tfm/public/amsfonts/symbols/msam5.tfm" 1794885172 924 9904cf1d39e9767e7a3622f2a125a565 ""
+  "c:/tools/tex/texlive/texmf-dist/fonts/tfm/public/amsfonts/symbols/msam7.tfm" 1794885172 928 2dc8d444221b7a635bb58038579b861a ""
+  "c:/tools/tex/texlive/texmf-dist/fonts/tfm/public/amsfonts/symbols/msbm10.tfm" 1794885172 908 2921f8a10601f252058503cc6570e581 ""
+  "c:/tools/tex/texlive/texmf-dist/fonts/tfm/public/amsfonts/symbols/msbm5.tfm" 1794885172 940 75ac932a52f80982a9f8ea75d03a34cf ""
+  "c:/tools/tex/texlive/texmf-dist/fonts/tfm/public/amsfonts/symbols/msbm7.tfm" 1794885172 940 228d6584342e91276bf566bcf9716b83 ""
   "c:/tools/tex/texlive/texmf-dist/fonts/tfm/public/cm/cmmi5.tfm" 1794885215 1508 c4419b1e413bcd6205bf37867d782a47 ""
   "c:/tools/tex/texlive/texmf-dist/fonts/tfm/public/cm/cmmi6.tfm" 1794885215 1512 f21f83efb36853c0b70002322c1ab3ad ""
   "c:/tools/tex/texlive/texmf-dist/fonts/tfm/public/cm/cmmi8.tfm" 1794885215 1520 eccf95517727cb11801f4f1aee3a21b4 ""
@@ -30,6 +38,10 @@
   "c:/tools/tex/texlive/texmf-dist/tex/generic/pdftexcmds/pdftexcmds.sty" 1794885406 20156 bac3b4ead5491323c0201b20993846e0 ""
   "c:/tools/tex/texlive/texmf-dist/tex/generic/stringenc/stringenc.sty" 1794885414 21514 b7557edcee22835ef6b03ede1802dad4 ""
   "c:/tools/tex/texlive/texmf-dist/tex/generic/uniquecounter/uniquecounter.sty" 1794885442 7008 f92eaa0a3872ed622bbf538217cd2ab7 ""
+  "c:/tools/tex/texlive/texmf-dist/tex/latex/amsfonts/amsfonts.sty" 1794885172 5949 3f3fd50a8cc94c3d4cbf4fc66cd3df1c ""
+  "c:/tools/tex/texlive/texmf-dist/tex/latex/amsfonts/amssymb.sty" 1794885172 13829 94730e64147574077f8ecfea9bb69af4 ""
+  "c:/tools/tex/texlive/texmf-dist/tex/latex/amsfonts/umsa.fd" 1794885172 961 6518c6525a34feb5e8250ffa91731cff ""
+  "c:/tools/tex/texlive/texmf-dist/tex/latex/amsfonts/umsb.fd" 1794885172 961 d02606146ba5601b5645f987c92e6193 ""
   "c:/tools/tex/texlive/texmf-dist/tex/latex/base/article.cls" 1794885293 20144 c320f103d647f141332f1a6594e2527e ""
   "c:/tools/tex/texlive/texmf-dist/tex/latex/base/fix-cm.sty" 1794885293 14741 c98e7b17e5d21add6fe391ecf7760402 ""
   "c:/tools/tex/texlive/texmf-dist/tex/latex/base/fontenc.sty" 1794885293 5275 144143a313c6836f22c335763a058d22 ""
@@ -97,15 +109,16 @@
   "c:/tools/tex/texlive/texmf-dist/web2c/texmf.cnf" 1794885152 43815 bcd8835056a2dfac260166a1c9541261 ""
   "c:/tools/tex/texlive/texmf-var/web2c/xetex/xelatex.fmt" 1794885482 5477701 3add7a4fb2c01da6484d911b6b6acb55 ""
   "c:/tools/tex/texlive/texmf.cnf" 1794885472 755 639003dd4ad18b875b8369800f2abbde ""
+  "e:/西交/研究生/比赛/AI大模型创新应用挑战赛/sciagent/docs/technical-report.tex" 1794910531 137917 5f9c63f93ed91c1fb4fa2b59498fd628 ""
   "figures/fig-agent.png" 1794885099 187647 a7b9479ee781121028653fd3ca0ad56e ""
   "figures/fig-arch.png" 1794885098 369534 33d575d7e2680d40a0dc02c1611a205e ""
   "figures/fig-deploy.png" 1794885090 187319 e69b0ad1483f45e75ab28ffed465d5f4 ""
   "figures/fig-retrieval.png" 1794885091 155203 b8703ac85b8c1f3720143cddc7d1447f ""
   "figures/fig-seq.png" 1794885089 224594 ef84238605e2179a3562f11bcefe79b3 ""
-  "technical-report.aux" 1794906359 6868 9e7abf2ae48f84ad84d85d2bb5d1d1a2 "xelatex"
-  "technical-report.out" 1794906359 1770 a6bbb9e599f2a74c4df3d0dab36d9cfe "xelatex"
-  "technical-report.tex" 1794906249 137267 d86fad1c447beadaa2505a6cb35c0084 ""
-  "technical-report.toc" 1794906359 968 c862f02fe225f529eaa661df7cbf8d52 "xelatex"
+  "technical-report.aux" 1794910533 6868 4db0f00b1e334a1156af28a0f8a8a83a "xelatex"
+  "technical-report.out" 1794910533 1770 a6bbb9e599f2a74c4df3d0dab36d9cfe "xelatex"
+  "technical-report.tex" 1794910531 137917 5f9c63f93ed91c1fb4fa2b59498fd628 ""
+  "technical-report.toc" 1794910533 968 c862f02fe225f529eaa661df7cbf8d52 "xelatex"
   (generated)
   "technical-report.aux"
   "technical-report.fls"
