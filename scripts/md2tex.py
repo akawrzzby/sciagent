@@ -22,7 +22,7 @@ PREAMBLE = r"""\documentclass[UTF8,fontset=windows,zihao=5,a4paper]{ctexart}
 
 % ---- 版心：中文期刊惯例，四周留白较宽
 \usepackage{geometry}
-\geometry{top=2.2cm,bottom=2.0cm,left=2.1cm,right=2.1cm,headsep=0.6cm,footskip=0.9cm}
+\geometry{top=2.0cm,bottom=1.9cm,left=1.95cm,right=1.95cm,headsep=0.55cm,footskip=0.85cm}
 \usepackage{xcolor}
 \usepackage{graphicx}
 \usepackage{booktabs}
@@ -62,8 +62,8 @@ PREAMBLE = r"""\documentclass[UTF8,fontset=windows,zihao=5,a4paper]{ctexart}
 % ---- 正文：宋体五号，首行缩进两字，段间不空行
 \setlength{\parindent}{2em}
 \setlength{\parskip}{0pt}
-\linespread{1.12}
-\AtBeginDocument{\fontsize{9}{11.2}\selectfont}
+\linespread{1.06}
+\AtBeginDocument{\fontsize{8.7}{10.6}\selectfont}
 \renewcommand{\arraystretch}{1.14}
 
 \setlist[itemize]{leftmargin=2.2em,itemsep=1pt,topsep=3pt,parsep=0pt}
@@ -275,7 +275,7 @@ def convert(md: str) -> str:
             caption = re.sub(r"^图\s*\d+[-−]\d+\s*", "", caption)
             out.append(r"\begin{figure}[htbp]")
             out.append(r"\centering")
-            out.append(r"\includegraphics[width=0.92\textwidth]{" +
+            out.append(r"\includegraphics[width=0.88\textwidth]{" +
                        path.replace("\\", "/") + "}")
             out.append(r"\caption{" + inline(caption) + "}")
             out.append(r"\end{figure}")
