@@ -84,3 +84,5 @@ scripts/try_api_routes.py
 *.toc
 *.out
 *.synctex.gz
+*.fls
+*.xdv
