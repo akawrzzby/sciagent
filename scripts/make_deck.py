@@ -157,16 +157,16 @@ def add_ribbon(slide, section: int) -> None:
 def page(title, section):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     add_ribbon(slide, section)
-    textbox(slide, 0.60, 1.58, 16.4, 0.85, title, size=34, bold=True)
+    textbox(slide, 0.60, 1.52, 16.8, 0.9, title, size=36, bold=True)
     return slide
 
 
-def lead(slide, text, *, y=2.55, size=21, w=18.4, color=INK):
+def lead(slide, text, *, y=2.55, size=23, w=18.4, color=INK):
     """The opening paragraph of a page: what this page is about, in prose."""
     return textbox(slide, 0.70, y, w, 1.6, text, size=size, color=color, spacing=1.45)
 
 
-def bars(slide, x, y, w, items, *, size=23, gap=1.25):
+def bars(slide, x, y, w, items, *, size=25, gap=1.25):
     for index, item in enumerate(items):
         top = y + index * gap
         dot = slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(x), Inches(top + 0.18),
@@ -214,8 +214,8 @@ def rule(slide, x, y, w, thickness=0.02, color=INK):
     return bar
 
 
-def three_line_table(slide, x, y, w, rows, col_widths, *, header_size=21,
-                     body_size=19, row_height=0.72):
+def three_line_table(slide, x, y, w, rows, col_widths, *, header_size=22,
+                     body_size=20, row_height=0.72):
     """A 三线表: a top rule, one under the header, one at the bottom."""
     total = sum(col_widths)
     widths = [w * width / total for width in col_widths]
@@ -281,21 +281,21 @@ slide = page("研究背景与五类困难", 0)
 lead(slide, "近年来，大语言模型在科研工作流中的应用日益广泛，文献检索、摘要筛选、文本改写与术语查询等环节"
             "均已出现较为成熟的辅助工具，信息获取的时间成本明显下降。然而现有工具的能力边界多止于语义理解层面，"
             "难以支撑从阅读到产出的完整流程，其局限主要体现在以下五个方面。",
-     size=20, y=2.48, w=18.6)
+     size=22, y=2.45, w=18.6)
 textbox(slide, 0.70, 3.95, 18.6, 4.6,
         "其一，版面结构：PDF 以视觉排版为目标，双栏文本、跨栏图表、公式与脚注常混合排布，直接抽取会导致阅读顺序错乱。\n"
         "其二，内容生成：模型可能虚构参考文献、混淆不同论文的作者，或将一项研究的结论错误归因于另一项工作。\n"
         "其三，工具割裂：阅读器仅承担呈现功能，翻译环节易丢失指代信息，文献管理软件不具备问答能力。\n"
         "其四，方向判断：即便完成二十篇文献的阅读，仍难以识别该领域尚未被覆盖的问题。\n"
         "其五，写作起点：框架、架构图与参考文献均需从零构建，其中参考文献的准确性最难保证。",
-        size=19, spacing=2.00)
-textbox(slide, 0.70, 7.55, 18.6, 0.6,
+        size=21, spacing=1.95)
+textbox(slide, 0.70, 7.60, 18.6, 0.6,
         "上述五类问题可归因于同一缺陷：模型输出的结论缺乏可回溯的原文依据。",
-        size=22, bold=True)
-textbox(slide, 0.70, 8.55, 18.6, 1.2,
+        size=24, bold=True)
+textbox(slide, 0.70, 8.60, 18.6, 1.2,
         "OpenScholar 在 Nature 的统计显示：在带引用生成任务中，引用幻觉率介于 78% 至 90%；"
         "PubMed Central 中被判定为伪造的引用占比在两年内增长约六倍；仅 26.5% 的生成引用完全正确。",
-        size=17, spacing=1.4)
+        size=18.5, spacing=1.4)
 
 # ------------------------------------------------ 3. 系统定位
 slide = page("系统定位：先把可信做实", 0)
@@ -303,55 +303,55 @@ lead(slide, "针对上述问题，本文的基本判断是：可信度的提升�
             "而取决于结论能否被核查。可信性包含两个必要条件——论断有出处，出处可定位。"
             "据此确立三条设计原则，并将其折算为三个可度量的目标。",
      size=20, y=2.50)
-textbox(slide, 0.70, 4.55, 18.4, 0.5, "三条原则", size=23, bold=True)
+textbox(slide, 0.70, 4.55, 18.4, 0.5, "三条原则", size=25, bold=True)
 bars(slide, 0.70, 5.10, 18.4, [
     "证据优先：每一项结论都绑定原文的字符区间，指不回去就不说",
     "结构优先：标题、表格、公式、参考文献分别建模，不做无结构拼接",
     "可降级：稠密通道失效退化为 BM25，模型超时给出明确错误",
-], size=21, gap=1.05)
-textbox(slide, 0.70, 8.05, 18.4, 0.5, "三个目标", size=23, bold=True)
+], size=23, gap=1.10)
+textbox(slide, 0.70, 8.05, 18.4, 0.5, "三个目标", size=25, bold=True)
 textbox(slide, 0.70, 8.62, 18.4, 1.8,
         "解析准确：标题层级、作者、表格与参考文献字段正确　·　"
         "回答可信：每条结论可点回原文　·　闭环完整：入库到写作全在系统内",
-        size=20, spacing=1.5)
+        size=22, spacing=1.5)
 
 # ------------------------------------------------ 4. 系统架构
 slide = page("系统架构：五层，每层只依赖下一层", 1)
 arch = FIGURES / "fig-arch.png"
 if arch.exists():
     slide.shapes.add_picture(str(arch), Inches(0.45), Inches(2.30), width=Inches(9.4))
-textbox(slide, 10.35, 2.30, 9.3, 0.5, "各层职责", size=22, bold=True)
+textbox(slide, 10.35, 2.30, 9.3, 0.5, "各层职责", size=24, bold=True)
 textbox(slide, 10.35, 2.85, 9.3, 5.3,
         "展现层　页面与事件流渲染，只调接口\n\n"
         "编排层　路由、规划、工具循环、作答与校验\n\n"
         "能力层　解析、检索、图谱、写作等纯函数\n\n"
         "存储层　论文、块、引用、会话与审计记录\n\n"
         "模型层　自托管大模型、向量与重排模型",
-        size=17, spacing=1.45)
+        size=18.5, spacing=1.45)
 rule(slide, 0.70, 8.72, 18.4, 0.012, RGBColor(0xB8, 0xBE, 0xC8))
 textbox(slide, 0.70, 8.86, 18.4, 1.2,
         "三处实测优化：编码吞吐 192 线程反而下降，64 线程时 7.2 → 99.7 篇/秒（13.8 倍）；"
         "答案阶段关闭推理通道，跨论文题 214 秒无答案降到 0.8 秒；向量索引按论文文件化，"
         "查询期只映射参与检索的几篇。",
-        size=15.5, spacing=1.35)
+        size=17, spacing=1.35)
 
 # ------------------------------------------------ 5. Agent 角色架构
 slide = page("Agent 角色架构：五个角色，一条回路", 1)
 agent_fig = FIGURES / "fig-agent.png"
 if agent_fig.exists():
     slide.shapes.add_picture(str(agent_fig), Inches(0.45), Inches(2.35), width=Inches(9.3))
-textbox(slide, 10.20, 2.35, 9.4, 0.45, "角色的分工", size=21, bold=True)
+textbox(slide, 10.20, 2.35, 9.4, 0.45, "角色的分工", size=23, bold=True)
 textbox(slide, 10.20, 2.85, 9.4, 5.2,
         "路由　规则优先判意图，未命中交给模型\n\n"
         "规划　拆成子任务与工具序列\n\n"
         "执行　ReAct 循环取证，带步数上限\n\n"
         "作答　只按证据编号起草\n\n"
         "校验　护栏、引用对齐、自反馈补检索",
-        size=16, spacing=1.45)
+        size=18, spacing=1.45)
 textbox(slide, 0.70, 8.85, 18.4, 1.0,
         "本文所指的角色是职责边界，而非独立人格体：同一模型承担五种职责，由提示与工具权限加以区分。"
         "已有研究表明，多角色互评会导致模型系统性高估自身产出（自评 6.1，人工评分 3.8），故本文只设岗位、不设角色扮演。",
-        size=14, spacing=1.4)
+        size=16, spacing=1.4)
 
 # ------------------------------------------------ 6. AI 技术选型
 slide = page("AI 技术方案：选型与理由", 1)
@@ -364,7 +364,7 @@ bars(slide, 0.70, 3.95, 18.4, [
     "检索　BM25 + bge-m3 + RRF：稀疏通道精确命中术语，稠密通道覆盖同义改写，RRF 融合只看排名",
     "重排　bge-reranker-v2-m3：交叉编码器逐对打分，把正确段落从第 2 位提到第 1 位",
     "扫描件　多模态 VLM：唯一能同时处理双栏顺序与数学公式的方案",
-], size=19, gap=1.30)
+], size=21, gap=1.30)
 
 # ------------------------------------------------ 7-14. 功能演示
 FEATURES = [
@@ -436,8 +436,8 @@ FEATURES = [
 
 for title, intro, points, label in FEATURES:
     slide = page(title, 2)
-    lead(slide, intro, size=19, y=2.50, w=8.8)
-    bars(slide, 0.70, 4.50, 8.4, points, size=20, gap=1.30)
+    lead(slide, intro, size=21, y=2.45, w=8.9)
+    bars(slide, 0.70, 4.55, 8.5, points, size=22, gap=1.32)
     video_frame(slide, 9.30, 2.35, 10.2, 5.75, label)
 
 # ------------------------------------------------ 15. 实验
@@ -445,8 +445,8 @@ slide = page("实验：数据、指标与理由", 3)
 lead(slide, "在一套冻结的十五篇文献库（461 页）上独立运行三次，每次重新问答。"
             "指标沿用学术问答评测的通行做法：忠实度与引用可溯源率参照 OpenScholar"
             "（Nature 650:857–863），检索用 top-5 命中率，拒答能力另设库外对照题。",
-     size=19, y=2.42, w=18.6)
-textbox(slide, 0.90, 3.55, 18.2, 0.45, "表 1　三次独立重复实验的指标结果", size=18, bold=True)
+     size=21, y=2.40, w=18.6)
+textbox(slide, 0.90, 3.55, 18.2, 0.45, "表 1　三次独立重复实验的指标结果", size=19.5, bold=True)
 three_line_table(slide, 0.90, 3.98, 18.2, [
     ["指标", "1", "2", "3", "均值 ± 标准差"],
     ["忠实度", "0.7898", "0.8168", "0.8035", "0.8034 ± 0.0110"],
@@ -456,40 +456,40 @@ three_line_table(slide, 0.90, 3.98, 18.2, [
 textbox(slide, 0.90, 7.10, 18.2, 0.8,
         "注：1–3 为三次独立运行的取值，标准差按样本标准差计算；三次共产生 158 条断言，"
         "其中 104 条被判为由所引证据支持，自反馈共触发 28 轮。",
-        size=14, color=INK, spacing=1.3)
-textbox(slide, 0.90, 8.05, 18.2, 0.45, "其余为单次测量，不随运行变化", size=18, bold=True)
+        size=15.5, color=INK, spacing=1.3)
+textbox(slide, 0.90, 8.05, 18.2, 0.45, "其余为单次测量，不随运行变化", size=20, bold=True)
 textbox(slide, 0.90, 8.50, 18.2, 1.6,
         "库外对照题 3/3，题面不在库内，三次全部拒答、零编造；"
         "检索命中率 top-5 为 1.0000，元数据感知检索后由 0.9286 提升；"
         "541 页书籍结构化解析 149.4 秒，产出 1254 个章节、131 万字符。",
-        size=17, spacing=1.5)
+        size=19, spacing=1.5)
 
 # ------------------------------------------------ 16. 创新点
 slide = page("创新点", 3)
 lead(slide, "本文的创新点分为两个层面：技术层面将可信性实现为可检查的机制，应用层面使文献阅读具备可用性。",
-     size=21, y=2.50, w=18.4)
-textbox(slide, 0.70, 3.55, 8.9, 0.55, "技术创新", size=25, bold=True)
+     size=23, y=2.45, w=18.4)
+textbox(slide, 0.70, 3.55, 8.9, 0.55, "技术创新", size=27, bold=True)
 bars(slide, 0.70, 4.20, 8.9, [
     "两阶段取证生成：证据是契约，不是提示词",
     "断言级引用对齐：每条结论统一到字符区间",
     "图论联合判基石：四指标投票与矛盾检测",
-], size=23, gap=1.40)
-textbox(slide, 10.30, 3.55, 8.6, 0.55, "应用创新", size=25, bold=True)
+], size=24, gap=1.45)
+textbox(slide, 10.30, 3.55, 8.6, 0.55, "应用创新", size=27, bold=True)
 bars(slide, 10.30, 4.20, 8.6, [
     "重排阅读：表格可选中、公式可排版",
     "中英逐句对照：悬停即见英文原句",
     "引用卡片：先看条目，再决定跳转",
-], size=23, gap=1.40)
+], size=24, gap=1.45)
 textbox(slide, 0.70, 8.55, 18.4, 1.4,
         "明确不做：多智能体角色扮演层。多角色互评会让模型系统性高估自身产出，"
         "本项目宁可少报，不报错。",
-        size=20, spacing=1.4)
+        size=21, spacing=1.4)
 
 # ------------------------------------------------ 17. 总结与展望
 slide = page("总结与展望：赛题要求与完成情况", 3)
 lead(slide, "对照赛题要求的六项能力，逐条说明做到什么程度。",
-     size=20, y=2.50, w=18.4)
-textbox(slide, 0.90, 3.30, 18.2, 0.45, "表 2　赛题要求与完成情况对照", size=18, bold=True)
+     size=22, y=2.45, w=18.4)
+textbox(slide, 0.90, 3.30, 18.2, 0.45, "表 2　赛题要求与完成情况对照", size=19.5, bold=True)
 three_line_table(slide, 0.90, 3.72, 18.2, [
     ["赛题要求", "完成情况"],
     ["文献解析与结构化", "15 篇 / 461 页；标题、表格、公式、参考文献全部结构化"],
@@ -498,11 +498,11 @@ three_line_table(slide, 0.90, 3.72, 18.2, [
     ["知识图谱与综述", "15 节点 / 14 条引用边，基石识别、矛盾检测、综述生成"],
     ["写作辅助", "论文框架、架构图、CSV 图表；幻觉引用拦截并展示"],
     ["部署与开源", "公开仓库、在线演示、27 页技术文档，测试 236 通过"],
-], col_widths=[5.6, 12.6], header_size=21, body_size=19, row_height=0.76)
+], col_widths=[5.6, 12.6], header_size=22, body_size=20, row_height=0.76)
 textbox(slide, 0.90, 9.30, 18.2, 1.5,
         "后续三件事：公式改为可检索的符号表达；接入更多文献来源，扩大可用语料；"
         "多用户并发与权限，支持团队共用。",
-        size=18, spacing=1.4)
+        size=20, spacing=1.4)
 
 # ------------------------------------------------------------------ 谢谢
 slide = prs.slides.add_slide(prs.slide_layouts[6])
