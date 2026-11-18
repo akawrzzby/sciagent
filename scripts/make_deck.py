@@ -157,16 +157,16 @@ def add_ribbon(slide, section: int) -> None:
 def page(title, section):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     add_ribbon(slide, section)
-    textbox(slide, 0.60, 1.62, 15.8, 0.8, title, size=32, bold=True)
+    textbox(slide, 0.60, 1.58, 16.4, 0.85, title, size=34, bold=True)
     return slide
 
 
-def lead(slide, text, *, y=2.55, size=19, w=18.4, color=INK):
+def lead(slide, text, *, y=2.55, size=21, w=18.4, color=INK):
     """The opening paragraph of a page: what this page is about, in prose."""
     return textbox(slide, 0.70, y, w, 1.6, text, size=size, color=color, spacing=1.45)
 
 
-def bars(slide, x, y, w, items, *, size=21, gap=1.25):
+def bars(slide, x, y, w, items, *, size=23, gap=1.25):
     for index, item in enumerate(items):
         top = y + index * gap
         dot = slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(x), Inches(top + 0.18),
@@ -198,9 +198,9 @@ def video_frame(slide, x, y, w, h, label):
     play.shadow.inherit = False
     textbox(slide, x + w / 2 - 0.5, y + h / 2 - 0.85, 1.0, 1.0, "▶", size=28,
             bold=True, color=RGBColor(0xFF, 0xFF, 0xFF), align=PP_ALIGN.CENTER)
-    textbox(slide, x, y + h / 2 + 0.3, w, 0.5, label, size=16, color=MUTED,
+    textbox(slide, x, y + h / 2 + 0.3, w, 0.5, label, size=17, color=MUTED,
             align=PP_ALIGN.CENTER)
-    textbox(slide, x, y + h - 0.62, w, 0.4, "插入 → 视频 → 此设备", size=12,
+    textbox(slide, x, y + h - 0.62, w, 0.4, "插入 → 视频 → 此设备", size=13,
             color=MUTED, align=PP_ALIGN.CENTER)
 
 
@@ -214,8 +214,8 @@ def rule(slide, x, y, w, thickness=0.02, color=INK):
     return bar
 
 
-def three_line_table(slide, x, y, w, rows, col_widths, *, header_size=19,
-                     body_size=17, row_height=0.72):
+def three_line_table(slide, x, y, w, rows, col_widths, *, header_size=21,
+                     body_size=19, row_height=0.72):
     """A 三线表: a top rule, one under the header, one at the bottom."""
     total = sum(col_widths)
     widths = [w * width / total for width in col_widths]
@@ -278,78 +278,80 @@ for shape in cover.shapes:
 
 # ------------------------------------------------ 2. 研究背景与五类困难
 slide = page("研究背景与五类困难", 0)
-lead(slide, "用大模型辅助科研，已经从尝试走向日常：检索、总结、改写都有成熟工具，"
-            "读一篇论文的时间确实被压缩了。但把它真正放进科研流程，仍受制于五类问题。"
-            "它们看似各不相同，最后都指向同一件事——模型给出的结论指不回原文。",
-     size=19, y=2.55)
-textbox(slide, 0.70, 4.62, 18.4, 0.9,
-        "这个缺口有多严重：带引用生成时，引用幻觉率在 78% 到 90% 之间；PubMed Central 上"
-        "被判定伪造的引用，从 2023 年的 1/2828 涨到 2025 年的 1/458；完全正确的引用只有 26.5%。"
-        "（OpenScholar，Nature 650:857–863）",
-        size=16, color=INK, spacing=1.4)
-bars(slide, 0.70, 5.85, 18.4, [
-    "版面：双栏顺序、跨栏图表、公式与脚注，直接抽取就是错序",
-    "生成：杜撰参考文献、混淆作者、把一篇的结论安到另一篇",
-    "阅读：工具彼此割裂，翻译丢失指代，管理软件不能提问",
-    "判断：读完二十篇，仍说不清哪些空白尚未被填补",
-    "写作：从零起笔，框架、架构图与参考文献最易出错",
-], size=19, gap=1.02)
+lead(slide, "把大模型用在科研上，已经不新鲜了。找文献、筛摘要、改写、查术语，都有现成工具，也确实省时间。"
+            "但真正跑完整条流程的研究者会发现，这些工具大多停在「读懂大意」这一步，再往下就走不动了。",
+     size=20, y=2.50, w=18.6)
+textbox(slide, 0.70, 3.55, 18.6, 5.4,
+        "卡住的地方有五个。\n"
+        "版面：PDF 是给人排的，双栏、跨栏图表、公式脚注混在一页里，机器直接抽出来是错序的。\n"
+        "生成：模型会编参考文献、把不同论文的作者混在一起，甚至把一篇的结论安到另一篇上。\n"
+        "阅读：阅读器只管显示，翻译丢了指代，文献管理软件又不能提问。\n"
+        "判断：读完二十篇，还是说不清这个方向哪些空白没人填。\n"
+        "写作：从零起笔，框架、架构图、参考文献，最后往往倒在参考文献上。",
+        size=20, spacing=1.75)
+textbox(slide, 0.70, 7.95, 18.6, 0.6,
+        "这五件事其实是同一件事：结论指不回原文。",
+        size=23, bold=True)
+textbox(slide, 0.70, 8.95, 18.6, 1.5,
+        "OpenScholar 在 Nature 上统计过一组数：带引用生成时，引用幻觉率在 78% 到 90%；"
+        "PubMed Central 上被判定伪造的引用，两年涨了六倍；完全正确的引用只有 26.5%。",
+        size=17, spacing=1.4)
 
 # ------------------------------------------------ 3. 系统定位
 slide = page("系统定位：先把可信做实", 0)
 lead(slide, "要解决上面五个问题，关键不在换一个更强的模型，而在让结论可核查。"
             "可信来自两件事：说法有出处，出处能定位。围绕这一点，系统定了三条原则，"
             "并把它们折算成三个可度量的目标。",
-     size=19, y=2.55)
-textbox(slide, 0.70, 4.55, 18.4, 0.5, "三条原则", size=21, bold=True)
+     size=20, y=2.50)
+textbox(slide, 0.70, 4.55, 18.4, 0.5, "三条原则", size=23, bold=True)
 bars(slide, 0.70, 5.10, 18.4, [
     "证据优先：每一项结论都绑定原文的字符区间，指不回去就不说",
     "结构优先：标题、表格、公式、参考文献分别建模，不做无结构拼接",
     "可降级：稠密通道失效退化为 BM25，模型超时给出明确错误",
-], size=19, gap=1.0)
-textbox(slide, 0.70, 8.05, 18.4, 0.5, "三个目标", size=21, bold=True)
-textbox(slide, 0.70, 8.60, 18.4, 1.6,
+], size=21, gap=1.05)
+textbox(slide, 0.70, 8.05, 18.4, 0.5, "三个目标", size=23, bold=True)
+textbox(slide, 0.70, 8.62, 18.4, 1.8,
         "解析准确：标题层级、作者、表格与参考文献字段正确　·　"
         "回答可信：每条结论可点回原文　·　闭环完整：入库到写作全在系统内",
-        size=18, spacing=1.4)
+        size=20, spacing=1.5)
 
 # ------------------------------------------------ 4. 系统架构
 slide = page("系统架构：五层，每层只依赖下一层", 1)
 arch = FIGURES / "fig-arch.png"
 if arch.exists():
     slide.shapes.add_picture(str(arch), Inches(0.45), Inches(2.30), width=Inches(9.4))
-textbox(slide, 10.35, 2.30, 9.3, 0.5, "各层职责", size=20, bold=True)
+textbox(slide, 10.35, 2.30, 9.3, 0.5, "各层职责", size=22, bold=True)
 textbox(slide, 10.35, 2.85, 9.3, 5.3,
         "展现层　页面与事件流渲染，只调接口\n\n"
         "编排层　路由、规划、工具循环、作答与校验\n\n"
         "能力层　解析、检索、图谱、写作等纯函数\n\n"
         "存储层　论文、块、引用、会话与审计记录\n\n"
         "模型层　自托管大模型、向量与重排模型",
-        size=15, spacing=1.4)
+        size=17, spacing=1.45)
 rule(slide, 0.70, 8.72, 18.4, 0.012, RGBColor(0xB8, 0xBE, 0xC8))
 textbox(slide, 0.70, 8.86, 18.4, 1.2,
         "三处实测优化：编码吞吐 192 线程反而下降，64 线程时 7.2 → 99.7 篇/秒（13.8 倍）；"
         "答案阶段关闭推理通道，跨论文题 214 秒无答案降到 0.8 秒；向量索引按论文文件化，"
         "查询期只映射参与检索的几篇。",
-        size=14, spacing=1.35)
+        size=15.5, spacing=1.35)
 
 # ------------------------------------------------ 5. Agent 角色架构
 slide = page("Agent 角色架构：五个角色，一条回路", 1)
 agent_fig = FIGURES / "fig-agent.png"
 if agent_fig.exists():
     slide.shapes.add_picture(str(agent_fig), Inches(0.45), Inches(2.35), width=Inches(9.3))
-textbox(slide, 10.20, 2.35, 9.4, 0.45, "角色的分工", size=19, bold=True)
+textbox(slide, 10.20, 2.35, 9.4, 0.45, "角色的分工", size=21, bold=True)
 textbox(slide, 10.20, 2.85, 9.4, 5.2,
         "路由　规则优先判意图，未命中交给模型\n\n"
         "规划　拆成子任务与工具序列\n\n"
         "执行　ReAct 循环取证，带步数上限\n\n"
         "作答　只按证据编号起草\n\n"
         "校验　护栏、引用对齐、自反馈补检索",
-        size=14, spacing=1.4)
+        size=16, spacing=1.45)
 textbox(slide, 0.70, 8.85, 18.4, 1.0,
         "角色是职责边界，不是各自扮演人格：同一个模型承担五种职责，靠提示与工具权限区分。"
         "多角色互相评审会让模型集体高估自己（自评 6.1 / 人类 3.8），所以只设岗位，不设演员。",
-        size=12.5, spacing=1.35)
+        size=14, spacing=1.4)
 
 # ------------------------------------------------ 6. AI 技术选型
 slide = page("AI 技术方案：选型与理由", 1)
@@ -362,7 +364,7 @@ bars(slide, 0.70, 3.95, 18.4, [
     "检索　BM25 + bge-m3 + RRF：稀疏通道精确命中术语，稠密通道覆盖同义改写，RRF 融合只看排名",
     "重排　bge-reranker-v2-m3：交叉编码器逐对打分，把正确段落从第 2 位提到第 1 位",
     "扫描件　多模态 VLM：唯一能同时处理双栏顺序与数学公式的方案",
-], size=17, gap=1.25)
+], size=19, gap=1.30)
 
 # ------------------------------------------------ 7-14. 功能演示
 FEATURES = [
@@ -434,55 +436,58 @@ FEATURES = [
 
 for title, intro, points, label in FEATURES:
     slide = page(title, 2)
-    lead(slide, intro, size=17, y=2.55, w=8.7)
-    bars(slide, 0.70, 4.45, 8.3, points, size=18, gap=1.30)
+    lead(slide, intro, size=19, y=2.50, w=8.8)
+    bars(slide, 0.70, 4.50, 8.4, points, size=20, gap=1.30)
     video_frame(slide, 9.30, 2.35, 10.2, 5.75, label)
 
 # ------------------------------------------------ 15. 实验
 slide = page("实验：数据、指标与理由", 3)
-lead(slide, "在一套冻结的十五篇文献库（461 页）上跑三轮取均值。指标沿用学术问答评测的通行做法："
-            "忠实度与引用可溯源率参照 OpenScholar（Nature 650:857–863），"
-            "检索用 top-5 命中率，拒答能力另设库外对照题。",
-     size=16, y=2.55, w=18.4)
-three_line_table(slide, 0.90, 4.35, 18.2, [
-    ["指标", "实测值", "含义与来源"],
-    ["忠实度", "0.8034", "答案断言被引用段落支持的比例；三轮 0.7898–0.8168"],
-    ["引用可溯源率", "1.0000", "104 条断言全部指向字符区间"],
-    ["上下文精确率", "0.2791", "检索段落中含答案的比例；偏低，见文档 §6.3"],
-    ["库外对照题", "3/3", "题面不在库内，全部诚实拒答，零编造"],
-    ["检索命中率 top-5", "1.0000", "元数据感知检索后由 0.9286 提升"],
-    ["结构化解析", "149.4 秒", "541 页书籍，1254 章节，131 万字符"],
-], col_widths=[4.6, 2.6, 11.0], header_size=19, body_size=17, row_height=0.72)
-textbox(slide, 0.90, 9.42, 18.2, 0.7,
-        "为什么用这几个指标：忠实度衡量「有没有编」，可溯源率衡量「能不能查」，"
-        "命中率衡量「找得准不准」，对照题衡量「敢不敢说不知道」。",
-        size=13.5, color=INK, spacing=1.3)
+lead(slide, "在一套冻结的十五篇文献库（461 页）上跑三次，每次独立问答。"
+            "指标沿用学术问答评测的通行做法：忠实度与引用可溯源率参照 OpenScholar"
+            "（Nature 650:857–863），检索用 top-5 命中率，拒答能力另设库外对照题。",
+     size=19, y=2.45, w=18.6)
+three_line_table(slide, 0.90, 3.95, 18.2, [
+    ["指标", "第一次", "第二次", "第三次", "均值", "极差"],
+    ["忠实度", "0.7898", "0.8168", "0.8035", "0.8034", "0.0270"],
+    ["引用可溯源率", "1.0000", "1.0000", "1.0000", "1.0000", "0"],
+    ["上下文精确率", "0.2874", "0.2632", "0.2867", "0.2791", "0.0242"],
+], col_widths=[4.6, 2.8, 2.8, 2.8, 2.8, 2.4], header_size=21, body_size=20, row_height=0.80)
+textbox(slide, 0.90, 7.45, 18.2, 0.5, "单次测量", size=21, bold=True)
+textbox(slide, 0.90, 7.95, 18.2, 1.1,
+        "库外对照题 3/3，题面不在库内，三次全部拒答、零编造；"
+        "检索命中率 top-5 1.0000，元数据感知检索后由 0.9286 提升；"
+        "541 页书籍结构化解析 149.4 秒，1254 章节、131 万字符。",
+        size=17, spacing=1.5)
+textbox(slide, 0.90, 9.35, 18.2, 1.3,
+        "三次共产生 158 条断言，其中 104 条被判为由所引证据支持，自反馈共触发 28 轮。"
+        "上下文精确率偏低，因为它按字符数计算、长段落会稀释，原因与两条改进路径写在文档 6.3 节。",
+        size=15.5, color=INK, spacing=1.35)
 
 # ------------------------------------------------ 16. 创新点
 slide = page("创新点", 3)
 lead(slide, "创新分两层：一是把「可信」做成可检查的机制，二是让阅读这件事真正变得可用。",
-     size=20, y=2.55, w=18.4)
-textbox(slide, 0.70, 3.55, 8.9, 0.55, "技术创新", size=23, bold=True)
+     size=21, y=2.50, w=18.4)
+textbox(slide, 0.70, 3.55, 8.9, 0.55, "技术创新", size=25, bold=True)
 bars(slide, 0.70, 4.20, 8.9, [
     "两阶段取证生成：证据是契约，不是提示词",
     "断言级引用对齐：每条结论统一到字符区间",
     "图论联合判基石：四指标投票与矛盾检测",
-], size=21, gap=1.35)
-textbox(slide, 10.30, 3.55, 8.6, 0.55, "应用创新", size=23, bold=True)
+], size=23, gap=1.40)
+textbox(slide, 10.30, 3.55, 8.6, 0.55, "应用创新", size=25, bold=True)
 bars(slide, 10.30, 4.20, 8.6, [
     "重排阅读：表格可选中、公式可排版",
     "中英逐句对照：悬停即见英文原句",
     "引用卡片：先看条目，再决定跳转",
-], size=21, gap=1.35)
+], size=23, gap=1.40)
 textbox(slide, 0.70, 8.55, 18.4, 1.4,
         "明确不做：多智能体角色扮演层。多角色互评会让模型系统性高估自身产出，"
         "本项目宁可少报，不报错。",
-        size=19, spacing=1.35)
+        size=20, spacing=1.4)
 
 # ------------------------------------------------ 17. 总结与展望
 slide = page("总结与展望：赛题要求与完成情况", 3)
 lead(slide, "对照赛题要求的六项能力，逐条说明做到什么程度。",
-     size=18, y=2.55, w=18.4)
+     size=20, y=2.50, w=18.4)
 three_line_table(slide, 0.90, 3.55, 18.2, [
     ["赛题要求", "完成情况"],
     ["文献解析与结构化", "15 篇 / 461 页；标题、表格、公式、参考文献全部结构化"],
@@ -491,11 +496,11 @@ three_line_table(slide, 0.90, 3.55, 18.2, [
     ["知识图谱与综述", "15 节点 / 14 条引用边，基石识别、矛盾检测、综述生成"],
     ["写作辅助", "论文框架、架构图、CSV 图表；幻觉引用拦截并展示"],
     ["部署与开源", "公开仓库、在线演示、27 页技术文档，测试 236 通过"],
-], col_widths=[5.6, 12.6], header_size=19, body_size=17, row_height=0.78)
-textbox(slide, 0.90, 9.20, 18.2, 1.4,
+], col_widths=[5.6, 12.6], header_size=21, body_size=19, row_height=0.80)
+textbox(slide, 0.90, 9.30, 18.2, 1.5,
         "后续三件事：公式改为可检索的符号表达；接入更多文献来源，扩大可用语料；"
         "多用户并发与权限，支持团队共用。",
-        size=16, spacing=1.35)
+        size=18, spacing=1.4)
 
 # ------------------------------------------------------------------ 谢谢
 slide = prs.slides.add_slide(prs.slide_layouts[6])
