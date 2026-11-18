@@ -337,10 +337,10 @@ textbox(slide, 0.70, 8.86, 18.4, 1.2,
 
 # ------------------------------------------------ 5. Agent 角色架构
 slide = page("Agent 角色架构：五个角色，一条回路", 1)
-agent_fig = FIGURES / "fig-agent-five-roles.png"
+agent_fig = FIGURES / "fig-agent-five-roles-gen.png"
 if agent_fig.exists():
-    slide.shapes.add_picture(str(agent_fig), Inches(1.70), Inches(2.42), width=Inches(16.6))
-textbox(slide, 0.70, 9.65, 18.6, 0.9,
+    slide.shapes.add_picture(str(agent_fig), Inches(3.05), Inches(2.35), width=Inches(13.9))
+textbox(slide, 0.70, 10.25, 18.6, 0.8,
         "五个角色由同一个模型承担，靠提示与工具权限区分：本文只设岗位，不设角色扮演。",
         size=17, spacing=1.35)
 
