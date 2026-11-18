@@ -337,21 +337,12 @@ textbox(slide, 0.70, 8.86, 18.4, 1.2,
 
 # ------------------------------------------------ 5. Agent 角色架构
 slide = page("Agent 角色架构：五个角色，一条回路", 1)
-agent_fig = FIGURES / "fig-agent.png"
+agent_fig = FIGURES / "fig-agent-five-roles.png"
 if agent_fig.exists():
-    slide.shapes.add_picture(str(agent_fig), Inches(0.45), Inches(2.35), width=Inches(9.3))
-textbox(slide, 10.20, 2.35, 9.4, 0.45, "角色的分工", size=23, bold=True)
-textbox(slide, 10.20, 2.85, 9.4, 5.2,
-        "路由　规则优先判意图，未命中交给模型\n\n"
-        "规划　拆成子任务与工具序列\n\n"
-        "执行　ReAct 循环取证，带步数上限\n\n"
-        "作答　只按证据编号起草\n\n"
-        "校验　护栏、引用对齐、自反馈补检索",
-        size=18, spacing=1.45)
-textbox(slide, 0.70, 8.85, 18.4, 1.0,
-        "本文所指的角色是职责边界，而非独立人格体：同一模型承担五种职责，由提示与工具权限加以区分。"
-        "已有研究表明，多角色互评会导致模型系统性高估自身产出（自评 6.1，人工评分 3.8），故本文只设岗位、不设角色扮演。",
-        size=16, spacing=1.4)
+    slide.shapes.add_picture(str(agent_fig), Inches(1.70), Inches(2.42), width=Inches(16.6))
+textbox(slide, 0.70, 9.65, 18.6, 0.9,
+        "五个角色由同一个模型承担，靠提示与工具权限区分：本文只设岗位，不设角色扮演。",
+        size=17, spacing=1.35)
 
 # ------------------------------------------------ 6. AI 技术选型
 slide = page("AI 技术方案：选型与理由", 1)
@@ -363,7 +354,7 @@ bars(slide, 0.70, 3.68, 18.4, [
     "解析　PyMuPDF-Layout：DocLayNet F1 0.8356，对 Docling 的 0.8102，参数 1.8M 且无需 GPU",
     "扫描件　多模态视觉模型：双栏顺序与数学公式可同时处理",
 ], size=21, gap=1.18)
-textbox(slide, 0.70, 6.72, 18.4, 0.45, "检索与重排：四步串联，各司其职", size=21, bold=True)
+textbox(slide, 0.70, 6.72, 18.4, 0.45, "检索与重排：四步串联，各司其职（BM25 是算法，bge 系列是小模型）", size=19, bold=True)
 pipeline = FIGURES / "fig-retrieval-pipeline.png"
 if pipeline.exists():
     slide.shapes.add_picture(str(pipeline), Inches(3.20), Inches(7.32), width=Inches(13.4))
